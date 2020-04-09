@@ -20,6 +20,6 @@ layout(set = 0, binding = 1) buffer readonly Materials {
 };
 
 void main() {
-    vec3 color = materials[MID].color;
+    const vec3 color = materials[MID].color;
     Color = vec4(color * N, V.w);
 }

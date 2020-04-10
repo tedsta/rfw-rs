@@ -3,7 +3,7 @@ use rayon::prelude::*;
 
 use crate::objects::*;
 use crate::scene::{PrimID, USE_MBVH};
-use bvh::{Bounds, Ray, RayPacket4, BVH, MBVH, Aabb};
+use bvh::{Bounds, Ray, RayPacket4, Aabb, TopDownBuilderBinnedSAH, LBVHBuilder, BVHBuilder};
 use serde::{Deserialize, Serialize};
 
 pub trait ToMesh {
@@ -15,8 +15,8 @@ pub trait ToMesh {
 pub struct RTMesh {
     triangles: Vec<RTTriangle>,
     materials: Vec<u32>,
-    bvh: BVH,
-    mbvh: MBVH,
+    // bvh: TopDownBuilderBinnedSAH,
+    bvh: LBVHBuilder,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -126,8 +126,8 @@ impl RTMesh {
         RTMesh {
             triangles: Vec::new(),
             materials: Vec::new(),
-            bvh: BVH::empty(),
-            mbvh: MBVH::empty(),
+            // bvh: TopDownBuilderBinnedSAH::new(7, 32, 3),
+            bvh: LBVHBuilder::new(),
         }
     }
 
@@ -178,16 +178,17 @@ impl RTMesh {
 
         let aabbs: Vec<Aabb> = triangles.iter().map(|t| t.bounds()).collect();
         let instant = std::time::Instant::now();
-        let bvh = BVH::construct(aabbs.as_slice());
+        // let mut bvh = TopDownBuilderBinnedSAH::new(7, 32, 3);
+        let mut bvh = LBVHBuilder::new();
+        bvh.build(aabbs.as_slice());
         println!("BVH build took {} ms", instant.elapsed().as_millis());
         let instant = std::time::Instant::now();
-        let mbvh = MBVH::construct(&bvh);
-        println!("MBVH build took {} ms", instant.elapsed().as_millis());
+        // let mbvh = MBVH::construct(&bvh);
+        // println!("MBVH build took {} ms", instant.elapsed().as_millis());
 
         RTMesh {
             triangles,
             bvh,
-            mbvh,
             materials: Vec::from(material_ids),
         }
     }
@@ -207,8 +208,7 @@ impl RTMesh {
 
         let aabbs: Vec<Aabb> = self.triangles.iter().map(|t| t.bounds()).collect();
 
-        self.bvh = BVH::construct(aabbs.as_slice());
-        self.mbvh = MBVH::construct(&self.bvh);
+        self.bvh.build(aabbs.as_slice());
 
         self
     }
@@ -218,67 +218,34 @@ impl Intersect for RTMesh {
     fn occludes(&self, ray: Ray, t_min: f32, t_max: f32) -> bool {
         let (origin, direction) = ray.into();
 
-        let intersection_test = |i, t_min, t_max| {
+        let i = |i, t_min, t_max| {
             let triangle: &RTTriangle = unsafe { self.triangles.get_unchecked(i) };
             triangle.occludes(ray, t_min, t_max)
         };
 
-        unsafe {
-            match USE_MBVH {
-                true => self.mbvh.occludes(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-                _ => self.bvh.occludes(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-            }
-        }
+        self.bvh.occludes(ray, t_min, t_max, i)
     }
 
     fn intersect(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
-        let (origin, direction) = ray.into();
-
-        let intersection_test = |i, t_min, t_max| {
-            let triangle: &RTTriangle = unsafe { self.triangles.get_unchecked(i) };
-            if let Some(mut hit) = triangle.intersect(ray, t_min, t_max) {
-                hit.mat_id = self.materials[i];
-                return Some((hit.t, hit));
-            }
-            None
-        };
-
-        unsafe {
-            match USE_MBVH {
-                true => self.mbvh.traverse(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-                _ => self.bvh.traverse(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-            }
-        }
+        unimplemented!();
+        // let (origin, direction) = ray.into();
+        //
+        // let i = |i, t_min, t_max| {
+        //     let triangle: &RTTriangle = unsafe { self.triangles.get_unchecked(i) };
+        //     if let Some(mut hit) = triangle.intersect(ray, t_min, t_max) {
+        //         hit.mat_id = self.materials[i];
+        //         return Some((hit.t, hit));
+        //     }
+        //     None
+        // };
+        //
+        // self.bvh.traverse(ray, t_min, t_max, i)
     }
 
     fn intersect_t(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<f32> {
         let (origin, direction) = ray.into();
 
-        let intersection_test = |i, t_min, t_max| {
+        let i = |i, t_min, t_max| {
             let triangle: &RTTriangle = unsafe { self.triangles.get_unchecked(i) };
             if let Some(t) = triangle.intersect_t(ray, t_min, t_max) {
                 return Some(t);
@@ -286,54 +253,17 @@ impl Intersect for RTMesh {
             None
         };
 
-        unsafe {
-            match USE_MBVH {
-                true => self.mbvh.traverse_t(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-                _ => self.bvh.traverse_t(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-            }
-        }
+        self.bvh.traverse_t(ray, t_min, t_max, i)
     }
 
     fn depth_test(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<(f32, u32)> {
         let (origin, direction) = ray.into();
 
-        let intersection_test = |i, t_min, t_max| -> Option<(f32, u32)> {
+        let i = |i, t_min, t_max| -> Option<(f32, u32)> {
             let triangle: &RTTriangle = unsafe { self.triangles.get_unchecked(i) };
             triangle.depth_test(ray, t_min, t_max)
         };
-
-        let hit = unsafe {
-            match USE_MBVH {
-                true => self.mbvh.depth_test(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-                _ => self.bvh.depth_test(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection_test,
-                ),
-            }
-        };
-
-        Some(hit)
+        Some(self.bvh.depth_test(ray, t_min, t_max, i))
     }
 
     fn intersect4(&self, packet: &mut RayPacket4, t_min: &[f32; 4]) -> Option<[PrimID; 4]> {
@@ -351,13 +281,7 @@ impl Intersect for RTMesh {
             }
         };
 
-        unsafe {
-            match USE_MBVH {
-                true => self.mbvh.traverse4(packet, intersection_test),
-                _ => self.bvh.traverse4(packet, intersection_test),
-            }
-        };
-
+        self.bvh.traverse4(packet, intersection_test);
         if valid {
             Some(prim_id)
         } else {
@@ -372,7 +296,7 @@ impl Intersect for RTMesh {
 
 impl Bounds for RTMesh {
     fn bounds(&self) -> Aabb {
-        self.bvh.nodes[0].bounds.clone()
+        self.bvh.bounds()
     }
 }
 

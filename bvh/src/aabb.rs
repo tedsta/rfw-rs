@@ -99,73 +99,50 @@ impl Aabb {
         }
     }
 
-    pub fn grow(&mut self, pos: Vec3) {
-        let min = Vec3::from(self.min);
-        let max = Vec3::from(self.max);
+    pub fn union(&mut self, pos: Vec3) {
+        let (min, max) = self.points();
+
         let min = min.min(pos);
         let max = max.max(pos);
 
-        for i in 0..3 {
-            self.min[i] = min[i];
-            self.max[i] = max[i];
-        }
+        self.min = min.into();
+        self.max = max.into();
+    }
+
+    pub fn grow(&mut self, pos: Vec3) {
+        let (min, max) = self.points();
+
+        let min = min.min(pos);
+        let max = max.max(pos);
+
+        self.min = min.into();
+        self.max = max.into();
     }
 
     pub fn grow_bb(&mut self, aabb: &Aabb) {
-        for i in 0..3 {
-            self.min[i] = self.min[i].min(aabb.min[i]);
-            self.max[i] = self.max[i].max(aabb.max[i]);
-        }
+        let (min, max) = self.points();
+        let (b_min, b_max) = aabb.points();
+        self.min = min.min(b_min).into();
+        self.max = max.max(b_max).into();
     }
 
     pub fn offset_by(&mut self, delta: f32) {
         let delta = Vec3::from([delta; 3]);
-
-        let min = Vec3::from(self.min);
-        let max = Vec3::from(self.max);
-        let min = min - delta;
-        let max = max + delta;
-
-        for i in 0..3 {
-            self.min[i] = min[i];
-            self.max[i] = max[i];
-        }
+        let (min, max) = self.points();
+        self.min = (min - delta).into();
+        self.max = (max + delta).into();
     }
 
     pub fn union_of(&self, bb: &Self) -> Self {
-        let min = Vec3::from(self.min).min(bb.min.into());
-        let max = Vec3::from(self.max).max(bb.max.into());
-
-        let mut new_min = [0.0; 3];
-        let mut new_max = [0.0; 3];
-
-        for i in 0..3 {
-            new_min[i] = min[i];
-            new_max[i] = max[i];
-        }
-
-        Self {
-            min: new_min,
-            max: new_max,
-        }
+        let (min, max) = self.points();
+        let (b_min, b_max) = bb.points();
+        Self { min: min.min(b_min).into(), max: max.max(b_max).into() }
     }
 
     pub fn intersection(&self, bb: &Self) -> Self {
-        let min = Vec3::from(self.min).max(Vec3::from(bb.min));
-        let max = Vec3::from(self.max).min(Vec3::from(bb.max));
-
-        let mut new_min = [0.0; 3];
-        let mut new_max = [0.0; 3];
-
-        for i in 0..3 {
-            new_min[i] = min[i].max(bb.min[i]);
-            new_max[i] = max[i].min(bb.max[i]);
-        }
-
-        Self {
-            min: new_min,
-            max: new_max,
-        }
+        let (min, max) = self.points();
+        let (b_min, b_max) = bb.points();
+        Self { min: min.max(b_min).into(), max: max.min(b_max).into() }
     }
 
     pub fn volume(&self) -> f32 {
@@ -174,7 +151,14 @@ impl Aabb {
     }
 
     pub fn center(&self) -> Vec3 {
-        (Vec3::from(self.min) + Vec3::from(self.max)) * 0.5
+        let (min, max) = self.points();
+        (min + max) * 0.5
+    }
+
+    pub fn offset(&self, p: Vec3) -> Vec3 {
+        let (min, max) = self.points();
+        let o = p - min;
+        o / max.cmpgt(min).select(max - min, Vec3::one())
     }
 
     pub fn area(&self) -> f32 {
@@ -256,5 +240,24 @@ impl Aabb {
             min: transformed.min,
             max: transformed.max,
         }
+    }
+
+    pub fn points(&self) -> (Vec3, Vec3) {
+        (self.min.into(), self.max.into())
+    }
+}
+
+impl From<(Vec3, Vec3)> for Aabb {
+    fn from(v: (Vec3, Vec3)) -> Self {
+        Aabb {
+            min: v.0.into(),
+            max: v.1.into(),
+        }
+    }
+}
+
+impl Into<(Vec3, Vec3)> for Aabb {
+    fn into(self) -> (Vec3, Vec3) {
+        self.points()
     }
 }

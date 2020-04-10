@@ -1,9 +1,9 @@
 use crate::objects::*;
 use crate::scene::*;
 use crate::{utils::*, MaterialList};
-use bvh::{Ray, Aabb};
+use bvh::{Ray, Aabb, TopDownBuilderBinnedSAH, BVHBuilder};
 
-use bvh::{Bounds, RayPacket4, ShadowPacket4, BVH, MBVH};
+use bvh::{Bounds, RayPacket4, ShadowPacket4};
 use glam::*;
 
 use serde::{Deserialize, Serialize};
@@ -528,8 +528,7 @@ pub struct RTTriangleScene {
     object_references: Vec<HashSet<usize>>,
     instances: Vec<Instance>,
     instance_references: Vec<usize>,
-    bvh: BVH,
-    mbvh: MBVH,
+    bvh: TopDownBuilderBinnedSAH,
     flags: Flags,
     empty_object_slots: Vec<usize>,
     empty_instance_slots: Vec<usize>,
@@ -543,8 +542,7 @@ impl RTTriangleScene {
             object_references: Vec::new(),
             instances: Vec::new(),
             instance_references: Vec::new(),
-            bvh: BVH::empty(),
-            mbvh: MBVH::empty(),
+            bvh: TopDownBuilderBinnedSAH::new(7, 32, 3),
             flags: Flags::new(),
             empty_object_slots: Vec::new(),
             empty_instance_slots: Vec::new(),
@@ -777,8 +775,7 @@ impl RTTriangleScene {
                 .iter()
                 .map(|o| o.bounds())
                 .collect::<Vec<Aabb>>();
-            self.bvh = BVH::construct(aabbs.as_slice());
-            self.mbvh = MBVH::construct(&self.bvh);
+            self.bvh.build(aabbs.as_slice());
         }
     }
 
@@ -801,7 +798,6 @@ impl RTTriangleScene {
             objects: self.objects.as_slice(),
             instances: self.instances.as_slice(),
             bvh: &self.bvh,
-            mbvh: &self.mbvh,
         }
     }
 }
@@ -810,8 +806,7 @@ impl RTTriangleScene {
 pub struct TriangleIntersector<'a> {
     objects: &'a [RTMesh],
     instances: &'a [Instance],
-    bvh: &'a BVH,
-    mbvh: &'a MBVH,
+    bvh: &'a TopDownBuilderBinnedSAH,
 }
 
 impl<'a> TriangleIntersector<'a> {
@@ -831,67 +826,8 @@ impl<'a> TriangleIntersector<'a> {
         };
 
         let bvh = self.bvh;
-        let mbvh = self.mbvh;
 
-        unsafe {
-            return match USE_MBVH {
-                true => mbvh.occludes(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-                _ => bvh.occludes(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-            };
-        }
-    }
-
-    pub fn intersect(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
-        let (origin, direction) = ray.into();
-
-        let mut instance_id = -1;
-        let intersection = |i, t_min, t_max| {
-            let instance = &self.instances[i as usize];
-            if let Some((origin, direction)) = instance.intersects(ray, t_max) {
-                if let Some(hit) = self.objects[instance.get_hit_id() as usize].intersect(
-                    (origin, direction).into(),
-                    t_min,
-                    t_max,
-                ) {
-                    instance_id = i as i32;
-                    return Some((hit.t, hit));
-                }
-            }
-            None
-        };
-
-        let hit = unsafe {
-            match USE_MBVH {
-                true => self.mbvh.traverse(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-                _ => self.bvh.traverse(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-            }
-        };
-
-        hit.and_then(|hit| Some(self.instances[instance_id as usize].transform_hit(hit)))
+        bvh.occludes(ray, t_min, t_max, intersection)
     }
 
     pub fn intersect_t(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<f32> {
@@ -909,24 +845,7 @@ impl<'a> TriangleIntersector<'a> {
             None
         };
 
-        unsafe {
-            return match USE_MBVH {
-                true => self.mbvh.traverse_t(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-                _ => self.bvh.traverse_t(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-            };
-        }
+        self.bvh.traverse_t(ray, t_min, t_max, intersection)
     }
 
     pub fn depth_test(&self, ray: Ray, t_min: f32, t_max: f32) -> (f32, u32) {
@@ -944,28 +863,11 @@ impl<'a> TriangleIntersector<'a> {
             None
         };
 
-        unsafe {
-            return match USE_MBVH {
-                true => self.mbvh.depth_test(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-                _ => self.bvh.depth_test(
-                    origin.as_ref(),
-                    direction.as_ref(),
-                    t_min,
-                    t_max,
-                    intersection,
-                ),
-            };
-        }
+        self.bvh.depth_test(ray, t_min, t_max, intersection)
     }
 
     pub fn occludes4(&self, _packet: ShadowPacket4) -> [bool; 4] {
-        [true; 4]
+        unimplemented!();
     }
 
     pub fn intersect4(
@@ -993,13 +895,7 @@ impl<'a> TriangleIntersector<'a> {
             }
         };
 
-        unsafe {
-            match USE_MBVH {
-                true => self.mbvh.traverse4(packet, intersection),
-                _ => self.bvh.traverse4(packet, intersection),
-            }
-        };
-
+        self.bvh.traverse4(packet, intersection);
         (instance_ids, prim_ids)
     }
 

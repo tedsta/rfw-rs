@@ -1,16 +1,57 @@
-use crate::bvh_node::BVHNode;
-use crate::{BVHBuilder, Aabb, BVHResult};
+use crate::{BVHBuilder, Aabb, RayPacket4, Ray, Bounds};
 use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 use crossbeam::thread::Scope;
 use std::sync::atomic::*;
+use std::fmt::{Display, Formatter};
+use glam::*;
+use serde::{Serialize, Deserialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[repr(C)]
+struct BVHNode {
+    pub bounds: Aabb,
+    pub left_first: i32,
+    pub count: i32,
+}
+
+
+impl Display for BVHNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.bounds)
+    }
+}
+
+#[allow(dead_code)]
+impl BVHNode {
+    pub fn new() -> BVHNode {
+        BVHNode {
+            bounds: Aabb::new(),
+            left_first: -1,
+            count: -1,
+        }
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        self.count >= 0
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopDownBuilderBinnedSAH {
+    nodes: Vec<BVHNode>,
+    prim_indices: Vec<u32>,
     bins: u32,
     max_depth: u32,
     max_prims: u32,
+}
+
+impl Bounds for TopDownBuilderBinnedSAH {
+    fn bounds(&self) -> Aabb {
+        self.nodes[0].bounds.clone()
+    }
 }
 
 struct NewNodeInfo {
@@ -33,6 +74,8 @@ struct NodeUpdatePayLoad {
 impl TopDownBuilderBinnedSAH {
     pub fn new(bins: usize, max_depth: usize, max_prims: usize) -> Self {
         Self {
+            nodes: Vec::new(),
+            prim_indices: Vec::new(),
             bins: bins as u32,
             max_depth: max_depth as u32,
             max_prims: max_prims as u32,
@@ -187,7 +230,7 @@ impl TopDownBuilderBinnedSAH {
     }
 
     // Reference single threaded subdivide method
-    pub fn subdivide(
+    fn subdivide(
         builder: &Self,
         index: usize,
         aabbs: &[Aabb],
@@ -468,10 +511,76 @@ impl TopDownBuilderBinnedSAH {
             right_count,
         })
     }
+
+    fn sort_nodes(
+        left: Option<(f32, f32)>,
+        right: Option<(f32, f32)>,
+        hit_stack: &mut [i32],
+        mut stack_ptr: i32,
+        left_first: i32,
+    ) -> i32 {
+        if left.is_some() & &right.is_some() {
+            let (t_near_left, _) = left.unwrap();
+            let (t_near_right, _) = right.unwrap();
+
+            if t_near_left < t_near_right {
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first;
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first + 1;
+            } else {
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first + 1;
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first;
+            }
+        } else if left.is_some() {
+            stack_ptr = stack_ptr + 1;
+            hit_stack[stack_ptr as usize] = left_first;
+        } else if right.is_some() {
+            stack_ptr = stack_ptr + 1;
+            hit_stack[stack_ptr as usize] = left_first + 1;
+        }
+
+        stack_ptr
+    }
+
+    fn sort_nodes4(
+        left: Option<[f32; 4]>,
+        right: Option<[f32; 4]>,
+        hit_stack: &mut [i32],
+        mut stack_ptr: i32,
+        left_first: i32,
+    ) -> i32 {
+        if left.is_some() & &right.is_some() {
+            let t_near_left = Vec4::from(left.unwrap());
+            let t_near_right = Vec4::from(right.unwrap());
+
+            if t_near_left.cmplt(t_near_right).bitmask() > 0 {
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first;
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first + 1;
+            } else {
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first + 1;
+                stack_ptr = stack_ptr + 1;
+                hit_stack[stack_ptr as usize] = left_first;
+            }
+        } else if left.is_some() {
+            stack_ptr = stack_ptr + 1;
+            hit_stack[stack_ptr as usize] = left_first;
+        } else if right.is_some() {
+            stack_ptr = stack_ptr + 1;
+            hit_stack[stack_ptr as usize] = left_first + 1;
+        }
+
+        stack_ptr
+    }
 }
 
 impl BVHBuilder for TopDownBuilderBinnedSAH {
-    fn build(&self, aabbs: &[Aabb]) -> BVHResult {
+    fn build(&mut self, aabbs: &[Aabb]) {
         let mut nodes = vec![BVHNode::new(); aabbs.len() * 2];
         let mut prim_indices = vec![0; aabbs.len()];
         prim_indices.iter_mut().enumerate().for_each(|(i, prim)| { *prim = i as u32 });
@@ -539,9 +648,182 @@ impl BVHBuilder for TopDownBuilderBinnedSAH {
         let node_count = pool_ptr.load(Ordering::SeqCst);
         nodes.resize(node_count, BVHNode::new());
 
-        BVHResult {
-            nodes,
-            prim_indices,
+        self.nodes = nodes;
+        self.prim_indices = prim_indices;
+    }
+
+    fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn traverse_t<I: FnMut(usize, f32, f32) -> Option<f32>>(&self, ray: Ray, t_min: f32, t_max: f32, mut is: I) -> Option<f32> {
+        let mut hit_stack = [0; 64];
+        let mut stack_ptr: i32 = 0;
+        let mut t = t_max;
+
+        let (origin, direction) = ray.into();
+        let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / direction;
+        hit_stack[stack_ptr as usize] = 0;
+        while stack_ptr >= 0 {
+            let node = &self.nodes[hit_stack[stack_ptr as usize] as usize];
+            stack_ptr = stack_ptr - 1;
+
+            if node.count > -1 {
+                // Leaf node
+                for i in 0..node.count {
+                    let prim_id = self.prim_indices[(node.left_first + i) as usize];
+                    if let Some(new_t) = is(prim_id as usize, t_min, t) {
+                        t = new_t;
+                    }
+                }
+            } else if node.left_first >= 0 {
+                let hit_left =
+                    self.nodes[node.left_first as usize]
+                        .bounds
+                        .intersect(origin, dir_inverse, t);
+                let hit_right = self.nodes[(node.left_first + 1) as usize]
+                    .bounds
+                    .intersect(origin, dir_inverse, t);
+                stack_ptr = Self::sort_nodes(
+                    hit_left,
+                    hit_right,
+                    hit_stack.as_mut(),
+                    stack_ptr,
+                    node.left_first,
+                );
+            }
+        }
+
+        if t < t_max {
+            Some(t)
+        } else {
+            None
+        }
+    }
+
+    fn occludes<I: FnMut(usize, f32, f32) -> bool>(&self, ray: Ray, t_min: f32, t_max: f32, mut occludes: I) -> bool {
+        let mut hit_stack = [0; 64];
+        let mut stack_ptr: i32 = 0;
+
+        let (origin, direction) = ray.into();
+        let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / direction;
+        hit_stack[stack_ptr as usize] = 0;
+        while stack_ptr >= 0 {
+            let node = &self.nodes[hit_stack[stack_ptr as usize] as usize];
+            stack_ptr = stack_ptr - 1;
+
+            if node.count > -1 {
+                // Leaf node
+                for i in 0..node.count {
+                    let prim_id = self.prim_indices[(node.left_first + i) as usize];
+                    if occludes(prim_id as usize, t_min, t_max) {
+                        return true;
+                    }
+                }
+            } else if node.left_first >= 0 {
+                let hit_left = self.nodes[node.left_first as usize].bounds.intersect(
+                    origin,
+                    dir_inverse,
+                    t_max,
+                );
+                let hit_right = self.nodes[(node.left_first + 1) as usize]
+                    .bounds
+                    .intersect(origin, dir_inverse, t_max);
+                stack_ptr = Self::sort_nodes(
+                    hit_left,
+                    hit_right,
+                    hit_stack.as_mut(),
+                    stack_ptr,
+                    node.left_first,
+                );
+            }
+        }
+
+        false
+    }
+
+    fn depth_test<I: Fn(usize, f32, f32) -> Option<(f32, u32)>>(&self, ray: Ray, t_min: f32, t_max: f32, is: I) -> (f32, u32) {
+        let mut t = t_max;
+
+        let (origin, direction) = ray.into();
+        let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / direction;
+
+        if self.nodes[0].bounds.intersect(origin, dir_inverse, t).is_none() {
+            return (t_max, 0);
+        }
+
+        let mut depth: i32 = 0;
+        let mut hit_stack = [0; 64];
+        let mut stack_ptr: i32 = 0;
+
+        while stack_ptr >= 0 {
+            depth = depth + 1;
+            let node = &self.nodes[hit_stack[stack_ptr as usize] as usize];
+            stack_ptr = stack_ptr - 1;
+
+            if node.count > -1 {
+                // Leaf node
+                for i in 0..node.count {
+                    let prim_id = self.prim_indices[(node.left_first + i) as usize];
+                    if let Some((new_t, d)) = is(prim_id as usize, t_min, t) {
+                        t = new_t;
+                        depth += d as i32;
+                    }
+                }
+            } else if node.left_first >= 0 {
+                let hit_left =
+                    self.nodes[node.left_first as usize]
+                        .bounds
+                        .intersect(origin, dir_inverse, t);
+                let hit_right = self.nodes[(node.left_first + 1) as usize]
+                    .bounds
+                    .intersect(origin, dir_inverse, t);
+                let new_stack_ptr = Self::sort_nodes(
+                    hit_left,
+                    hit_right,
+                    hit_stack.as_mut(),
+                    stack_ptr,
+                    node.left_first,
+                );
+                stack_ptr = new_stack_ptr;
+            }
+        }
+
+        (t, depth as u32)
+    }
+
+    fn traverse4<I: FnMut(usize, &mut RayPacket4)>(&self, packet: &mut RayPacket4, mut is: I) {
+        let mut hit_stack = [0; 64];
+        let mut stack_ptr: i32 = 0;
+
+        let one = Vec4::one();
+        let inv_dir_x = one / Vec4::from(packet.direction_x);
+        let inv_dir_y = one / Vec4::from(packet.direction_y);
+        let inv_dir_z = one / Vec4::from(packet.direction_z);
+
+        while stack_ptr >= 0 {
+            let node = &self.nodes[hit_stack[stack_ptr as usize] as usize];
+            stack_ptr = stack_ptr - 1;
+
+            if node.count > -1 {
+                // Leaf node
+                for i in 0..node.count {
+                    let prim_id = self.prim_indices[(node.left_first + i) as usize] as usize;
+                    is(prim_id, packet);
+                }
+            } else if node.left_first >= 0 {
+                let hit_left =
+                    self.nodes[node.left_first as usize].bounds.intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z);
+                let hit_right = self.nodes[(node.left_first + 1) as usize].bounds.intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z);
+
+                stack_ptr = Self::sort_nodes4(
+                    hit_left,
+                    hit_right,
+                    hit_stack.as_mut(),
+                    stack_ptr,
+                    node.left_first,
+                );
+            }
         }
     }
 }

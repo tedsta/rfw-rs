@@ -5,7 +5,7 @@ use crate::scene::PrimID;
 use serde::{Serialize, Deserialize};
 use glam::*;
 
-use bvh::{Bounds, Ray, RayPacket4, AABB};
+use bvh::{Bounds, Ray, RayPacket4, Aabb};
 use std::ops::BitAnd;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
@@ -371,8 +371,8 @@ impl Intersect for RTTriangle {
 }
 
 impl Bounds for RTTriangle {
-    fn bounds(&self) -> AABB {
-        let mut aabb = AABB::new();
+    fn bounds(&self) -> Aabb {
+        let mut aabb = Aabb::new();
         aabb.grow(Vec3::from(self.vertex0));
         aabb.grow(Vec3::from(self.vertex1));
         aabb.grow(Vec3::from(self.vertex2));

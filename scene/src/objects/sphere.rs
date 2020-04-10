@@ -1,7 +1,7 @@
 use crate::objects::*;
 use crate::scene::PrimID;
 
-use bvh::{Bounds, Ray, RayPacket4, AABB};
+use bvh::{Bounds, Ray, RayPacket4, Aabb};
 use serde::{Deserialize, Serialize};
 use glam::*;
 
@@ -224,7 +224,7 @@ impl Intersect for Sphere {
 }
 
 impl Bounds for Sphere {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         let radius = self.radius2.sqrt() + crate::constants::AABB_EPSILON;
         let min: [f32; 3] = [
             self.pos[0] - radius,
@@ -236,11 +236,9 @@ impl Bounds for Sphere {
             self.pos[1] + radius,
             self.pos[2] + radius,
         ];
-        AABB {
+        Aabb {
             min,
-            left_first: -1,
             max,
-            count: -1,
         }
     }
 }

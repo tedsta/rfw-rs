@@ -1,7 +1,7 @@
 use crate::objects::*;
 use crate::constants::EPSILON;
 
-use bvh::{Bounds, RayPacket4, AABB, Ray};
+use bvh::{Bounds, RayPacket4, Ray, Aabb};
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,18 +166,16 @@ impl Intersect for Plane {
 }
 
 impl Bounds for Plane {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         let right_offset = self.dims[0] * Vec3::from(self.right);
         let forward_offset = self.dims[1] * Vec3::from(self.forward);
 
         let min = Vec3::from(self.pos) - right_offset - forward_offset - Vec3::splat(EPSILON);
         let max = Vec3::from(self.pos) + right_offset + forward_offset + Vec3::splat(EPSILON);
 
-        AABB {
+        Aabb {
             min: min.into(),
-            left_first: -1,
             max: max.into(),
-            count: -1,
         }
     }
 }

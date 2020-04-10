@@ -5,60 +5,39 @@ use std::fmt::{Display, Formatter};
 use crate::RayPacket4;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[repr(C)]
-pub struct AABB {
+pub struct Aabb {
     pub min: [f32; 3],
-    pub left_first: i32,
     pub max: [f32; 3],
-    pub count: i32,
 }
-
-// impl Serialize for AABB {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         let mut s = serializer.serialize_struct("AABB", 4)?;
-//         s.serialize_field("min", &self.min)?;
-//         s.serialize_field("left_first", &self.left_first)?;
-//         s.serialize_field("max", &self.max)?;
-//         s.serialize_field("count", &self.count)?;
-//         s.end()
-//     }
-// }
 
 pub trait Bounds {
-    fn bounds(&self) -> AABB;
+    fn bounds(&self) -> Aabb;
 }
 
-impl Display for AABB {
+impl Display for Aabb {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let min = Vec3::from(self.min);
         let max = Vec3::from(self.max);
 
         write!(
             f,
-            "(min: ({}, {}, {}), left_first: {}, max: ({}, {}, {}), count: {})",
+            "(min: ({}, {}, {}),  max: ({}, {}, {}))",
             min.x(),
             min.y(),
             min.z(),
-            self.left_first,
             max.x(),
             max.y(),
             max.z(),
-            self.count
         )
     }
 }
 
 #[allow(dead_code)]
-impl AABB {
-    pub fn new() -> AABB {
-        AABB {
+impl Aabb {
+    pub fn new() -> Aabb {
+        Aabb {
             min: [1e34; 3],
-            left_first: -1,
             max: [-1e34; 3],
-            count: -1,
         }
     }
 
@@ -132,7 +111,7 @@ impl AABB {
         }
     }
 
-    pub fn grow_bb(&mut self, aabb: &AABB) {
+    pub fn grow_bb(&mut self, aabb: &Aabb) {
         for i in 0..3 {
             self.min[i] = self.min[i].min(aabb.min[i]);
             self.max[i] = self.max[i].max(aabb.max[i]);
@@ -153,7 +132,7 @@ impl AABB {
         }
     }
 
-    pub fn union_of(&self, bb: &AABB) -> AABB {
+    pub fn union_of(&self, bb: &Self) -> Self {
         let min = Vec3::from(self.min).min(bb.min.into());
         let max = Vec3::from(self.max).max(bb.max.into());
 
@@ -165,15 +144,13 @@ impl AABB {
             new_max[i] = max[i];
         }
 
-        AABB {
+        Self {
             min: new_min,
-            left_first: -1,
             max: new_max,
-            count: -1,
         }
     }
 
-    pub fn intersection(&self, bb: &AABB) -> AABB {
+    pub fn intersection(&self, bb: &Self) -> Self {
         let min = Vec3::from(self.min).max(Vec3::from(bb.min));
         let max = Vec3::from(self.max).min(Vec3::from(bb.max));
 
@@ -185,11 +162,9 @@ impl AABB {
             new_max[i] = max[i].min(bb.max[i]);
         }
 
-        AABB {
+        Self {
             min: new_min,
-            left_first: -1,
             max: new_max,
-            count: -1,
         }
     }
 
@@ -250,7 +225,7 @@ impl AABB {
         self.max[axis] - self.min[axis]
     }
 
-    pub fn transformed(&self, transform: Mat4) -> AABB {
+    pub fn transformed(&self, transform: Mat4) -> Aabb {
         let p1 = transform * Vec3::new(self.min[0], self.min[1], self.min[2]).extend(1.0);
         let p5 = transform * Vec3::new(self.max[0], self.max[1], self.max[2]).extend(1.0);
         let p2 = transform * Vec3::new(self.max[0], self.min[1], self.min[2]).extend(1.0);
@@ -260,7 +235,7 @@ impl AABB {
         let p7 = transform * Vec3::new(self.min[0], self.max[1], self.min[2]).extend(1.0);
         let p8 = transform * Vec3::new(self.max[0], self.min[1], self.max[2]).extend(1.0);
 
-        let mut transformed = AABB::new();
+        let mut transformed = Aabb::new();
         transformed.grow(p1.truncate());
         transformed.grow(p2.truncate());
         transformed.grow(p3.truncate());
@@ -277,10 +252,9 @@ impl AABB {
 
     pub fn transform(&mut self, transform: Mat4) {
         let transformed = self.transformed(transform);
-        *self = AABB {
+        *self = Self {
             min: transformed.min,
             max: transformed.max,
-            ..(*self).clone()
         }
     }
 }

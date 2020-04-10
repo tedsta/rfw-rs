@@ -3,7 +3,7 @@ use rayon::prelude::*;
 
 use crate::objects::*;
 use crate::scene::{PrimID, USE_MBVH};
-use bvh::{Bounds, Ray, RayPacket4, AABB, BVH, MBVH};
+use bvh::{Bounds, Ray, RayPacket4, BVH, MBVH, Aabb};
 use serde::{Deserialize, Serialize};
 
 pub trait ToMesh {
@@ -32,7 +32,7 @@ pub struct VertexBuffer {
     pub count: usize,
     pub size_in_bytes: usize,
     pub buffer: wgpu::Buffer,
-    pub bounds: AABB,
+    pub bounds: Aabb,
 }
 
 impl VertexData {
@@ -50,7 +50,7 @@ impl VertexData {
 pub struct RastMesh {
     vertices: Vec<VertexData>,
     materials: Vec<u32>,
-    bounds: AABB,
+    bounds: Aabb,
 }
 
 impl RastMesh {
@@ -65,7 +65,7 @@ impl RastMesh {
         assert_eq!(uvs.len(), material_ids.len() * 3);
         assert_eq!(vertices.len() % 3, 0);
 
-        let mut bounds = AABB::new();
+        let mut bounds = Aabb::new();
         let mut vertex_data = vec![VertexData::zero(); vertices.len()];
 
         for vertex in vertices {
@@ -99,7 +99,7 @@ impl RastMesh {
         RastMesh {
             vertices: Vec::new(),
             materials: Vec::new(),
-            bounds: AABB::new(),
+            bounds: Aabb::new(),
         }
     }
 
@@ -119,33 +119,6 @@ impl RastMesh {
             std::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.buffer_size())
         }
     }
-
-    // #[cfg(feature = "wgpu")]
-    // pub fn create_wgpu_buffer(&self, device: &wgpu::Device) -> VertexBuffer {
-    //     use wgpu::*;
-
-    //     let size = self.vertices.len() * std::mem::size_of::<VertexData>();
-
-    //     let triangle_buffer = device.create_buffer_with_data(
-    //         unsafe { std::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, size) },
-    //         wgpu::BufferUsage::VERTEX,
-    //     );
-
-    //     // let triangle_buffer = device.create_buffer_mapped(&BufferDescriptor {
-    //     // label: Some("mesh"),
-    //     // size: size as BufferAddress,
-    //     // usage: ,
-    //     // });
-    //     //
-    //     // triangle_buffer.data.copy_from_slice();
-
-    //     VertexBuffer {
-    //         count: self.vertices.len(),
-    //         size_in_bytes: size,
-    //         buffer: triangle_buffer,
-    //         bounds: self.bounds(),
-    //     }
-    // }
 }
 
 impl RTMesh {
@@ -203,9 +176,13 @@ impl RTMesh {
             };
         });
 
-        let aabbs: Vec<AABB> = triangles.iter().map(|t| t.bounds()).collect();
+        let aabbs: Vec<Aabb> = triangles.iter().map(|t| t.bounds()).collect();
+        let instant = std::time::Instant::now();
         let bvh = BVH::construct(aabbs.as_slice());
+        println!("BVH build took {} ms", instant.elapsed().as_millis());
+        let instant = std::time::Instant::now();
         let mbvh = MBVH::construct(&bvh);
+        println!("MBVH build took {} ms", instant.elapsed().as_millis());
 
         RTMesh {
             triangles,
@@ -228,7 +205,7 @@ impl RTMesh {
             t.vertex2 = vertex2.truncate().into();
         });
 
-        let aabbs: Vec<AABB> = self.triangles.iter().map(|t| t.bounds()).collect();
+        let aabbs: Vec<Aabb> = self.triangles.iter().map(|t| t.bounds()).collect();
 
         self.bvh = BVH::construct(aabbs.as_slice());
         self.mbvh = MBVH::construct(&self.bvh);
@@ -394,13 +371,13 @@ impl Intersect for RTMesh {
 }
 
 impl Bounds for RTMesh {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.bvh.nodes[0].bounds.clone()
     }
 }
 
 impl Bounds for RastMesh {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.bounds.clone()
     }
 }

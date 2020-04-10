@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::aabb::Bounds;
 use crate::bvh_node::*;
 use crate::mbvh_node::*;
-use crate::{RayPacket4, AABB};
+use crate::{RayPacket4, Aabb, TopDownBuilderBinnedSAH, BVHBuilder};
 use rayon::prelude::*;
 
 use serde::{Serialize, Deserialize};
@@ -28,93 +28,27 @@ impl BVH {
         self.prim_indices.len()
     }
 
-    pub fn construct(aabbs: &[AABB]) -> Self {
-        let mut nodes = vec![
-            BVHNode {
-                bounds: AABB::new()
-            };
-            aabbs.len() * 2
-        ];
-        let mut prim_indices = vec![0; aabbs.len()];
-        for i in 0..aabbs.len() {
-            prim_indices[i] = i as u32;
-        }
-
-        let centers = aabbs
-            .into_par_iter()
-            .map(|bb| {
-                let center = [
-                    (bb.min[0] + bb.max[0]) * 0.5,
-                    (bb.min[1] + bb.max[1]) * 0.5,
-                    (bb.min[2] + bb.max[2]) * 0.5,
-                ];
-                center
-            })
-            .collect::<Vec<[f32; 3]>>();
-        let pool_ptr = Arc::new(AtomicUsize::new(2));
-        let depth = 1;
-
-        let mut root_bounds = AABB::new();
-
-        root_bounds.left_first = 0;
-        root_bounds.count = aabbs.len() as i32;
-        for aabb in aabbs {
-            root_bounds.grow_bb(aabb);
-        }
-        nodes[0].bounds = root_bounds.clone();
-
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let thread_count = Arc::new(AtomicUsize::new(1));
-        let handle = crossbeam::scope(|s| {
-            BVHNode::subdivide_mt(
-                0,
-                root_bounds,
-                aabbs,
-                &centers,
-                sender,
-                prim_indices.as_mut_slice(),
-                depth,
-                pool_ptr.clone(),
-                thread_count,
-                num_cpus::get(),
-                s,
-            );
-        });
-
-        for payload in receiver.iter() {
-            if payload.index >= nodes.len() {
-                panic!(
-                    "Index was {} but only {} nodes available, bounds: {}",
-                    payload.index,
-                    nodes.len(),
-                    payload.bounds
-                );
-            }
-            nodes[payload.index].bounds = payload.bounds;
-        }
-
-        handle.unwrap();
-
-        let node_count = pool_ptr.load(Ordering::SeqCst);
-        nodes.resize(node_count, BVHNode::new());
+    pub fn construct(aabbs: &[Aabb]) -> Self {
+        let instant = std::time::Instant::now();
+        let builder = TopDownBuilderBinnedSAH::new(7, 64, 3);
+        let result = builder.build(aabbs);
+        println!("took {} ms", instant.elapsed().as_millis());
 
         BVH {
-            nodes,
-            prim_indices,
+            nodes: result.nodes,
+            prim_indices: result.prim_indices,
         }
     }
 
-    pub fn refit(&mut self, aabbs: &[AABB]) {
+    pub fn refit(&mut self, aabbs: &[Aabb]) {
         for i in (0..self.nodes.len()).rev() {
-            let mut aabb = AABB::new();
-            let left_first = self.nodes[i].get_left_first();
-            let count = self.nodes[i].get_count();
+            let mut aabb = Aabb::new();
+            let left_first = self.nodes[i].left_first;
+            let count = self.nodes[i].count;
             if left_first < 0 && count < 0 {
                 return;
             }
 
-            aabb.left_first = left_first;
-            aabb.count = count;
             if self.nodes[i].is_leaf() {
                 for i in 0..count {
                     let prim_id = self.prim_indices[(left_first + i) as usize] as usize;
@@ -265,8 +199,8 @@ impl MBVH {
             for i in 0..bvh.nodes.len() {
                 let cur_node = &bvh.nodes[i];
                 m_nodes[0].set_bounds_bb(i, &cur_node.bounds);
-                m_nodes[0].children[i] = cur_node.bounds.left_first;
-                m_nodes[0].counts[i] = cur_node.bounds.count;
+                m_nodes[0].children[i] = cur_node.left_first;
+                m_nodes[0].counts[i] = cur_node.count;
             }
 
             return MBVH {
@@ -425,13 +359,13 @@ impl From<BVH> for MBVH {
 }
 
 impl Bounds for BVH {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.nodes[0].bounds.clone()
     }
 }
 
 impl Bounds for MBVH {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.nodes[0].bounds.clone()
     }
 }

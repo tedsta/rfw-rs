@@ -1,7 +1,7 @@
 use crate::objects::*;
 
 use bvh::aabb::Bounds;
-use bvh::{Ray, RayPacket4, AABB};
+use bvh::{Ray, RayPacket4, Aabb};
 
 use serde::{Serialize, Deserialize};
 use glam::*;
@@ -10,7 +10,8 @@ use glam::*;
 /// Takes in a bounding box and transform and transforms to and from object local space.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Instance {
-    bounds: AABB,
+    bounds: Aabb,
+    hit_id: u32,
     transform: [f32; 16],
     inverse: [f32; 16],
     normal_transform: [f32; 16],
@@ -18,16 +19,17 @@ pub struct Instance {
 
 #[allow(dead_code)]
 impl Instance {
-    pub fn new(hit_id: isize, bounds: &AABB, transform: Mat4) -> Instance {
+    pub fn new(hit_id: isize, bounds: &Aabb, transform: Mat4) -> Instance {
         let inverse = transform.inverse();
 
         let normal_transform = inverse.transpose();
-        let mut bounds = bounds.transformed(transform);
+        let bounds = bounds.transformed(transform);
 
-        bounds.left_first = hit_id as i32;
+        let hit_id = hit_id as u32;
 
         Instance {
             bounds,
+            hit_id,
             transform: transform.to_cols_array(),
             inverse: inverse.to_cols_array(),
             normal_transform: normal_transform.to_cols_array(),
@@ -185,12 +187,12 @@ impl Instance {
 
     #[inline(always)]
     pub fn get_hit_id(&self) -> usize {
-        self.bounds.left_first as usize
+        self.hit_id as usize
     }
 }
 
 impl Bounds for Instance {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.bounds.clone()
     }
 }

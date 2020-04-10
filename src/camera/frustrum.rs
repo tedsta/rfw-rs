@@ -1,6 +1,6 @@
-use bvh::AABB;
 use glam::*;
 use std::convert::Into;
+use bvh::Aabb;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum FrustrumResult {
@@ -169,7 +169,7 @@ impl FrustrumG {
         result
     }
 
-    pub fn aabb_in_frustrum(&self, b: &AABB) -> FrustrumResult {
+    pub fn aabb_in_frustrum(&self, b: &Aabb) -> FrustrumResult {
         let mut result = FrustrumResult::Outside;
 
         for plane in &self.planes {
@@ -228,33 +228,27 @@ mod tests {
     #[test]
     fn frustrum_works() {
         use crate::camera::*;
-        use bvh::AABB;
+        use bvh::Aabb;
 
         let camera = Camera::zero();
 
-        let frustrum: FrustrumG = FrustrumG::from_matrix(camera.get_gl_matrix());
+        let frustrum: FrustrumG = FrustrumG::from_matrix(camera.get_rh_matrix());
 
         let point_behind = Vec3::new(0.0, 0.0, -1.0);
         let point_in_front = Vec3::new(0.0, 0.0, 1.0);
-        let aabb_in_front = AABB {
+        let aabb_in_front = Aabb {
             min: Vec3::new(0.2, 0.2, 5.0).into(),
-            left_first: 0,
             max: Vec3::new(0.2, 0.2, 5.0).into(),
-            count: 0,
         };
 
-        let aabb_in_back = AABB {
+        let aabb_in_back = Aabb {
             min: Vec3::new(-1.0, 0.0, -2.0).into(),
-            left_first: 0,
             max: Vec3::new(1.0, 0.0, -2.0).into(),
-            count: 0,
         };
 
-        let aabb_half = AABB {
+        let aabb_half = Aabb {
             min: Vec3::new(-5.0, 0.0, 2.0).into(),
-            left_first: 0,
             max: Vec3::new(0.0, 0.0, 2.0).into(),
-            count: 0,
         };
 
         assert_eq!(

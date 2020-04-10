@@ -34,35 +34,50 @@ pub struct CPUApp {
 impl CPUApp {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let mut materials = MaterialList::new();
-        let scene_str = "models/dragon_sphere.rtscene";
 
-        let scene = if let Ok(scene) = RTTriangleScene::deserialize(scene_str) {
-            scene
-        } else {
-            let mut scene = RTTriangleScene::new();
-            let dragon = scene.load_mesh("models/dragon.obj", &mut materials, Some(50.0)).unwrap();
-            let _ = scene.add_instance(
-                dragon,
-                Mat4::from_translation(Vec3::new(0.0, 0.0, 5.0)) * Mat4::from_scale(Vec3::splat(0.1)),
-            ).unwrap();
+        // let scene_str = "sponza.rtscene";
+        // let scene = if let Ok(scene) = RTTriangleScene::deserialize(scene_str) {
+        //     scene
+        // } else {
+        let mut scene = RTTriangleScene::new();
+        let mesh = scene::Obj::new("models/sponza/sponza.obj", &mut materials)?.into_rt_mesh();
+        let sponza = scene.add_object(mesh);
+        // let sponza = scene.load_mesh("models/sponza/sponza.obj", &mut materials, None).unwrap();
+        let _ = scene.add_instance(sponza, Mat4::identity()).unwrap();
 
-            let sphere = scene.load_mesh("models/sphere.obj", &mut materials, Some(0.01)).unwrap();
-            (-2..3).for_each(|x| {
-                (3..8).for_each(|z| {
-                    let matrix = Mat4::from_translation(Vec3::new(x as f32 * 2.0, 0.0, z as f32 * 2.0));
-                    scene.add_instance(sphere, matrix).unwrap();
-                })
-            });
+        scene.build_bvh();
+        // scene.serialize(scene_str).unwrap();
+        // scene
+        // };
 
-            let quad_mat_id = materials.add(Vec3::new(0.2, 0.2, 1.0), 1.0, Vec3::one(), 1.0) as u32;
-            let quad = Quad::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -2.0, 10.0), 10., 10.0, quad_mat_id)
-                .into_rt_mesh();
-            let quad = scene.add_object(quad);
-            let _ = scene.add_instance(quad, Mat4::identity()).unwrap();
-            scene.build_bvh();
-            scene.serialize(scene_str).unwrap();
-            scene
-        };
+        // let scene_str = "models/dragon_sphere.rtscene";
+        // let scene = if let Ok(scene) = RTTriangleScene::deserialize(scene_str) {
+        //     scene
+        // } else {
+        //     let mut scene = RTTriangleScene::new();
+        //     let dragon = scene.load_mesh("models/dragon.obj", &mut materials, Some(50.0)).unwrap();
+        //     let _ = scene.add_instance(
+        //         dragon,
+        //         Mat4::from_translation(Vec3::new(0.0, 0.0, 5.0)) * Mat4::from_scale(Vec3::splat(0.1)),
+        //     ).unwrap();
+        //
+        //     let sphere = scene.load_mesh("models/sphere.obj", &mut materials, Some(0.01)).unwrap();
+        //     (-2..3).for_each(|x| {
+        //         (3..8).for_each(|z| {
+        //             let matrix = Mat4::from_translation(Vec3::new(x as f32 * 2.0, 0.0, z as f32 * 2.0));
+        //             scene.add_instance(sphere, matrix).unwrap();
+        //         })
+        //     });
+        //
+        //     let quad_mat_id = materials.add(Vec3::new(0.2, 0.2, 1.0), 1.0, Vec3::one(), 1.0) as u32;
+        //     let quad = Quad::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -2.0, 10.0), 10., 10.0, quad_mat_id)
+        //         .into_rt_mesh();
+        //     let quad = scene.add_object(quad);
+        //     let _ = scene.add_instance(quad, Mat4::identity()).unwrap();
+        //     scene.build_bvh();
+        //     scene.serialize(scene_str).unwrap();
+        //     scene
+        // };
 
         let num_threads = num_cpus::get();
         let (width, height) = (1, 1);

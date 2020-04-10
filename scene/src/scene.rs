@@ -1,7 +1,7 @@
 use crate::objects::*;
 use crate::utils::*;
 
-use bvh::{Bounds, Ray, RayPacket4, ShadowPacket4, AABB, BVH, MBVH};
+use bvh::{Bounds, Ray, RayPacket4, ShadowPacket4, BVH, MBVH, Aabb};
 use glam::*;
 use std::collections::HashSet;
 use std::error::Error;
@@ -76,8 +76,8 @@ impl Intersect for NullObject {
 }
 
 impl Bounds for NullObject {
-    fn bounds(&self) -> AABB {
-        AABB::new()
+    fn bounds(&self) -> Aabb {
+        Aabb::new()
     }
 }
 
@@ -259,11 +259,11 @@ impl Scene {
     pub fn build_bvh(&mut self) {
         if self.flags.has_flag(SceneFlags::Dirty) {
             // Need to rebuild bvh
-            let aabbs: Vec<AABB> = self
+            let aabbs: Vec<Aabb> = self
                 .instances
                 .iter()
                 .map(|o| o.bounds())
-                .collect::<Vec<AABB>>();
+                .collect::<Vec<Aabb>>();
 
             if self.bvh.prim_count() == aabbs.len() {
                 self.bvh.refit(aabbs.as_slice());
@@ -504,7 +504,7 @@ impl<'a> Intersector<'a> {
 }
 
 impl Bounds for Scene {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.bvh.bounds()
     }
 }

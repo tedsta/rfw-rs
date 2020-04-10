@@ -1,13 +1,13 @@
 use crate::objects::*;
 use crate::scene::*;
 use crate::{utils::*, MaterialList};
-use bvh::Ray;
+use bvh::{Ray, Aabb};
 
-use bvh::{Bounds, RayPacket4, ShadowPacket4, AABB, BVH, MBVH};
+use bvh::{Bounds, RayPacket4, ShadowPacket4, BVH, MBVH};
 use glam::*;
 
 use serde::{Deserialize, Serialize};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::{
     collections::HashSet, error::Error, fs::File, io::prelude::*, io::BufReader, path::Path,
 };
@@ -369,15 +369,15 @@ impl TriangleScene {
     }
 
     pub fn get_object<T>(&self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&RastMesh>),
+        where
+            T: FnMut(Option<&RastMesh>),
     {
         cb(self.objects.get(index));
     }
 
     pub fn get_object_mut<T>(&mut self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&mut RastMesh>),
+        where
+            T: FnMut(Option<&mut RastMesh>),
     {
         cb(self.objects.get_mut(index));
         self.flags.set_flag(SceneFlags::Dirty);
@@ -640,15 +640,15 @@ impl RTTriangleScene {
     }
 
     pub fn get_object<T>(&self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&RTMesh>),
+        where
+            T: FnMut(Option<&RTMesh>),
     {
         cb(self.objects.get(index));
     }
 
     pub fn get_object_mut<T>(&mut self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&mut RTMesh>),
+        where
+            T: FnMut(Option<&mut RTMesh>),
     {
         cb(self.objects.get_mut(index));
         self.flags.set_flag(SceneFlags::Dirty);
@@ -772,11 +772,11 @@ impl RTTriangleScene {
     pub fn build_bvh(&mut self) {
         if self.flags.has_flag(SceneFlags::Dirty) {
             // Need to rebuild bvh
-            let aabbs: Vec<AABB> = self
+            let aabbs: Vec<Aabb> = self
                 .instances
                 .iter()
                 .map(|o| o.bounds())
-                .collect::<Vec<AABB>>();
+                .collect::<Vec<Aabb>>();
             self.bvh = BVH::construct(aabbs.as_slice());
             self.mbvh = MBVH::construct(&self.bvh);
         }
@@ -1018,7 +1018,7 @@ impl<'a> TriangleIntersector<'a> {
 }
 
 impl Bounds for RTTriangleScene {
-    fn bounds(&self) -> AABB {
+    fn bounds(&self) -> Aabb {
         self.bvh.bounds()
     }
 }

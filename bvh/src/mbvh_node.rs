@@ -1,5 +1,5 @@
 use crate::bvh_node::*;
-use crate::{RayPacket4, AABB};
+use crate::{RayPacket4, Aabb};
 use serde::{Deserialize, Serialize};
 
 use glam::*;
@@ -57,7 +57,7 @@ impl MBVHNode {
         self.max_z[node_id] = max[2];
     }
 
-    pub fn set_bounds_bb(&mut self, node_id: usize, bounds: &AABB) {
+    pub fn set_bounds_bb(&mut self, node_id: usize, bounds: &Aabb) {
         self.set_bounds(node_id, &bounds.min, &bounds.max);
     }
 
@@ -241,9 +241,9 @@ impl MBVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> Option<R>
-    where
-        I: FnMut(usize, f32, f32) -> Option<(f32, R)>,
-        R: Copy,
+        where
+            I: FnMut(usize, f32, f32) -> Option<(f32, R)>,
+            R: Copy,
     {
         let mut todo = [0; 32];
         let mut stack_ptr = 0;
@@ -266,7 +266,7 @@ impl MBVHNode {
                             for i in 0..count {
                                 let prim_id = prim_indices[(left_first + i) as usize] as usize;
                                 if let Some((new_t, new_hit)) =
-                                    intersection_test(prim_id as usize, t_min, t)
+                                intersection_test(prim_id as usize, t_min, t)
                                 {
                                     t = new_t;
                                     hit_record = Some(new_hit);
@@ -295,8 +295,8 @@ impl MBVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> Option<f32>
-    where
-        I: FnMut(usize, f32, f32) -> Option<f32>,
+        where
+            I: FnMut(usize, f32, f32) -> Option<f32>,
     {
         let mut todo = [0; 32];
         let mut stack_ptr = -1;
@@ -347,8 +347,8 @@ impl MBVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> bool
-    where
-        I: FnMut(usize, f32, f32) -> bool,
+        where
+            I: FnMut(usize, f32, f32) -> bool,
     {
         let mut todo = [0; 32];
         let mut stack_ptr = -1;
@@ -395,8 +395,8 @@ impl MBVHNode {
         t_max: f32,
         depth_test: I,
     ) -> (f32, u32)
-    where
-        I: Fn(usize, f32, f32) -> Option<(f32, u32)>,
+        where
+            I: Fn(usize, f32, f32) -> Option<(f32, u32)>,
     {
         let mut todo = [0; 32];
         let mut stack_ptr: i32 = 0;
@@ -506,7 +506,7 @@ impl MBVHNode {
                 continue;
             }
 
-            if mbvh_pool[m_index].counts[idx] < 0 {
+            if mbvh_pool[m_index].counts[idx] < 0 && mbvh_pool[m_index].children[idx] >= 0 {
                 // Not a leaf node
                 let cur_node = mbvh_pool[m_index].children[idx] as usize;
                 let new_idx = *pool_ptr;
@@ -522,44 +522,51 @@ impl MBVHNode {
         self.counts = [-1; 4];
         let mut num_children = 0;
 
-        let left_node = &pool[node.get_left_first() as usize];
-        let right_node = &pool[(node.get_left_first() + 1) as usize];
+        let left_first = node.left_first;
+        if left_first < 0 {
+            return 0;
+        }
+
+        let left_node = &pool[left_first as usize];
+        let right_node = &pool[(left_first + 1) as usize];
 
         if left_node.is_leaf() {
             let idx = num_children;
             num_children += 1;
-            self.children[idx] = left_node.get_left_first();
-            self.counts[idx] = left_node.get_count();
+            self.children[idx] = left_node.left_first;
+            self.counts[idx] = left_node.count;
             self.set_bounds_bb(idx, &left_node.bounds);
         } else {
-            // Node has children
-            let idx1 = num_children;
-            num_children += 1;
-            let idx2 = num_children;
-            num_children += 1;
+            let left = left_node.left_first;
+            let right = left_node.left_first + 1;
 
-            let left = left_node.get_left_first();
-            let right = left_node.get_left_first() + 1;
+            if left >= 0 {
+                // Node has children
+                let idx1 = num_children;
+                num_children += 1;
+                let idx2 = num_children;
+                num_children += 1;
 
-            let left_node = &pool[left as usize];
-            let right_node = &pool[right as usize];
+                let left_node = &pool[left as usize];
+                let right_node = &pool[right as usize];
 
-            self.set_bounds_bb(idx1, &left_node.bounds);
-            if left_node.is_leaf() {
-                self.children[idx1] = left_node.get_left_first();
-                self.counts[idx1] = left_node.get_count();
-            } else {
-                self.children[idx1] = left;
-                self.counts[idx1] = -1;
-            }
+                self.set_bounds_bb(idx1, &left_node.bounds);
+                if left_node.is_leaf() {
+                    self.children[idx1] = left_node.left_first;
+                    self.counts[idx1] = left_node.count;
+                } else {
+                    self.children[idx1] = left;
+                    self.counts[idx1] = -1;
+                }
 
-            self.set_bounds_bb(idx2, &right_node.bounds);
-            if right_node.is_leaf() {
-                self.children[idx2] = right_node.get_left_first();
-                self.counts[idx2] = right_node.get_count();
-            } else {
-                self.children[idx2] = right;
-                self.counts[idx2] = -1;
+                self.set_bounds_bb(idx2, &right_node.bounds);
+                if right_node.is_leaf() {
+                    self.children[idx2] = right_node.left_first;
+                    self.counts[idx2] = right_node.count;
+                } else {
+                    self.children[idx2] = right;
+                    self.counts[idx2] = -1;
+                }
             }
         }
 
@@ -569,36 +576,38 @@ impl MBVHNode {
             num_children += 1;
             self.set_bounds_bb(idx, &right_node.bounds);
 
-            self.children[idx] = right_node.get_left_first();
-            self.counts[idx] = right_node.get_count();
+            self.children[idx] = right_node.left_first;
+            self.counts[idx] = right_node.count;
         } else {
-            let idx1 = num_children;
-            num_children += 1;
-            let idx2 = num_children;
-            num_children += 1;
+            let left = right_node.left_first;
+            let right = right_node.left_first + 1;
 
-            let left = right_node.get_left_first();
-            let right = right_node.get_left_first() + 1;
+            if left >= 0 {
+                let idx1 = num_children;
+                num_children += 1;
+                let idx2 = num_children;
+                num_children += 1;
 
-            let left_node = &pool[left as usize];
-            let right_node = &pool[right as usize];
+                let left_node = &pool[left as usize];
+                let right_node = &pool[right as usize];
 
-            self.set_bounds_bb(idx1, &left_node.bounds);
-            if left_node.is_leaf() {
-                self.children[idx1] = left_node.get_left_first();
-                self.counts[idx1] = left_node.get_count();
-            } else {
-                self.children[idx1] = left;
-                self.counts[idx1] = -1;
-            }
+                self.set_bounds_bb(idx1, &left_node.bounds);
+                if left_node.is_leaf() {
+                    self.children[idx1] = left_node.left_first;
+                    self.counts[idx1] = left_node.count;
+                } else {
+                    self.children[idx1] = left;
+                    self.counts[idx1] = -1;
+                }
 
-            self.set_bounds_bb(idx2, &right_node.bounds);
-            if right_node.is_leaf() {
-                self.children[idx2] = right_node.get_left_first();
-                self.counts[idx2] = right_node.get_count();
-            } else {
-                self.children[idx2] = right;
-                self.counts[idx2] = -1;
+                self.set_bounds_bb(idx2, &right_node.bounds);
+                if right_node.is_leaf() {
+                    self.children[idx2] = right_node.left_first;
+                    self.counts[idx2] = right_node.count;
+                } else {
+                    self.children[idx2] = right;
+                    self.counts[idx2] = -1;
+                }
             }
         }
 
@@ -610,15 +619,20 @@ impl MBVHNode {
                 }
 
                 let left = self.children[i];
+                if left < 0 {
+                    continue;
+                }
+
                 let right = left + 1;
+
                 let left_sub_node = &pool[left as usize];
                 let right_sub_node = &pool[right as usize];
 
                 // Overwrite current node
                 self.set_bounds_bb(i, &left_sub_node.bounds);
                 if left_sub_node.is_leaf() {
-                    self.children[i] = left_sub_node.get_left_first();
-                    self.counts[i] = left_sub_node.get_count();
+                    self.children[i] = left_sub_node.left_first;
+                    self.counts[i] = left_sub_node.count;
                 } else {
                     self.children[i] = left;
                     self.counts[i] = -1;
@@ -627,8 +641,8 @@ impl MBVHNode {
                 // Add its right node
                 self.set_bounds_bb(num_children, &right_sub_node.bounds);
                 if right_sub_node.is_leaf() {
-                    self.children[num_children] = right_sub_node.get_left_first();
-                    self.counts[num_children] = right_sub_node.get_count();
+                    self.children[num_children] = right_sub_node.left_first;
+                    self.counts[num_children] = right_sub_node.count;
                 } else {
                     self.children[num_children] = right;
                     self.counts[num_children] = -1;

@@ -38,7 +38,12 @@ void main() {
     vec3 normal = N;
 
     if (materials[MID].diffuse_tex > 0) {
-        color = texture(sampler2D(AlbedoT, Sampler), TUV).rgb;
+        vec4 t_color = texture(sampler2D(AlbedoT, Sampler), TUV).rgba;
+        if (t_color.a < 0.5) {
+            discard;
+        }
+
+        color = t_color.xyz;
     }
     if (materials[MID].normal_tex > 0) {
         normal = texture(sampler2D(NormalT, Sampler), TUV).rgb;

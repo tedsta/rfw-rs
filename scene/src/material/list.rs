@@ -169,7 +169,7 @@ impl MaterialList {
         }
 
         // Loading was successful
-        let img = img.unwrap().rotate180();
+        let img = img.unwrap().flipv();
 
         let (width, height) = (img.width(), img.height());
         let mut data = vec![0 as u32; (width * height) as usize];

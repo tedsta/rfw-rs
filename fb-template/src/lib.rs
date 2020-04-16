@@ -183,7 +183,7 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
         format: wgpu::TextureFormat::Bgra8UnormSrgb,
         width: start_width,
         height: start_height,
-        present_mode: wgpu::PresentMode::Immediate,
+        present_mode: wgpu::PresentMode::Mailbox,
     };
 
     app.init(

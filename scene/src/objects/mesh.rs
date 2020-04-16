@@ -28,11 +28,20 @@ pub struct VertexData {
     pub uv: [f32; 2],
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct VertexMesh {
+    pub first: u32,
+    pub last: u32,
+    pub mat_id: u32,
+    pub bounds: AABB,
+}
+
 pub struct VertexBuffer {
     pub count: usize,
     pub size_in_bytes: usize,
     pub buffer: wgpu::Buffer,
     pub bounds: AABB,
+    pub meshes: Vec<VertexMesh>,
 }
 
 impl VertexData {
@@ -48,9 +57,10 @@ impl VertexData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RastMesh {
-    vertices: Vec<VertexData>,
-    materials: Vec<u32>,
-    bounds: AABB,
+    pub vertices: Vec<VertexData>,
+    pub materials: Vec<u32>,
+    pub meshes: Vec<VertexMesh>,
+    pub bounds: AABB,
 }
 
 impl RastMesh {
@@ -84,9 +94,32 @@ impl RastMesh {
             };
         });
 
+        let mut last_id = material_ids[0];
+        let mut start = 0;
+        let mut range = 0;
+        let mut meshes: Vec<VertexMesh> = Vec::new();
+        let mut v_bounds = AABB::new();
+
+        for i in 0..material_ids.len() {
+            range += 1;
+            for j in 0..3 {
+                v_bounds.grow(vertices[i * 3 + j]);
+            }
+
+            if last_id != material_ids[i] {
+                bounds = AABB::new();
+                meshes.push(VertexMesh { first: start * 3, last: (start + range) * 3, mat_id: last_id, bounds: v_bounds.clone() });
+
+                last_id = material_ids[i];
+                start = i as u32;
+                range = 1;
+            }
+        }
+
         RastMesh {
             vertices: vertex_data,
             materials: Vec::from(material_ids),
+            meshes,
             bounds,
         }
     }
@@ -99,6 +132,7 @@ impl RastMesh {
         RastMesh {
             vertices: Vec::new(),
             materials: Vec::new(),
+            meshes: Vec::new(),
             bounds: AABB::new(),
         }
     }

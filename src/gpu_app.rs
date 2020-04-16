@@ -32,6 +32,11 @@ pub struct GPUApp<'a> {
     depth_texture: Option<wgpu::Texture>,
     depth_texture_view: Option<wgpu::TextureView>,
     material_buffer: Option<(wgpu::BufferAddress, wgpu::Buffer)>,
+    material_textures: Vec<wgpu::Texture>,
+    material_texture_views: Vec<wgpu::TextureView>,
+    material_texture_sampler: Option<wgpu::Sampler>,
+    material_bind_groups: Vec<wgpu::BindGroup>,
+    texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
     scene: TriangleScene,
     camera: Camera,
     timer: Timer,
@@ -44,6 +49,7 @@ impl<'a> GPUApp<'a> {
         let compiler = CompilerBuilder::new()
             .with_opt_level(OptimizationLevel::Zero)
             .with_warnings_as_errors()
+            .with_include_dir("src/shaders")
             .build();
 
         let scene = TriangleScene::new();
@@ -71,6 +77,11 @@ impl<'a> GPUApp<'a> {
             depth_texture: None,
             depth_texture_view: None,
             material_buffer: None,
+            material_textures: Vec::new(),
+            material_texture_views: Vec::new(),
+            material_texture_sampler: None,
+            material_bind_groups: Vec::new(),
+            texture_bind_group_layout: None,
             scene,
             camera: Camera::zero(),
             timer: Timer::new(),
@@ -131,7 +142,12 @@ impl<'a> GPUApp<'a> {
                     let bounds = vb.bounds.transformed(instance_buffers.actual_matrices[i]);
                     if frustrum.aabb_in_frustrum(&bounds) != FrustrumResult::Outside {
                         let i = i as u32;
-                        render_pass.draw(0..(vb.count as u32), i..(i + 1));
+                        for mesh in vb.meshes.iter() {
+                            if frustrum.aabb_in_frustrum(&mesh.bounds) != FrustrumResult::Outside {
+                                render_pass.set_bind_group(2, &self.material_bind_groups[mesh.mat_id as usize], &[]);
+                                render_pass.draw(mesh.first..mesh.last, i..(i + 1));
+                            }
+                        }
                     }
                 }
             }
@@ -156,68 +172,41 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         use wgpu::*;
         self.sc_format = sc_format;
 
-        if let Ok(scene) = TriangleScene::deserialize("models/dragon.scene") {
-            println!("Loaded scene from cached file: models/dragon.scene");
+        if let Ok(scene) = TriangleScene::deserialize("models/sponza.scene") {
+            println!("Loaded scene from cached file: models/sponza.scene");
             self.scene = scene;
         } else {
-            let (object, scale) = {
-                #[cfg(not(debug_assertions))]
-                    {
-                        (
-                            self.scene
-                                .load_mesh("models/dragon.obj")
-                                .expect("Could not load dragon.obj"),
-                            Vec3::splat(5.0),
-                        )
-                    }
-
-                #[cfg(debug_assertions)]
-                    {
-                        (
-                            self.scene
-                                .load_mesh("models/sphere.obj")
-                                .expect("Could not load sphere.obj"),
-                            Vec3::splat(0.05),
-                        )
-                    }
-            };
+            let object = self.scene
+                .load_mesh("models/sponza/sponza.obj")
+                .expect("Could not load sponza.obj");
 
             let _object = self
                 .scene
-                .add_instance(
-                    object,
-                    Mat4::from_translation(Vec3::new(0.0, 0.0, 5.0)) * Mat4::from_scale(scale),
-                )
-                .unwrap();
-            let _object = self
-                .scene
-                .add_instance(
-                    object,
-                    Mat4::from_translation(Vec3::new(5.0, 0.0, 5.0)) * Mat4::from_scale(scale),
-                )
-                .unwrap();
-            let _object = self
-                .scene
-                .add_instance(
-                    object,
-                    Mat4::from_translation(Vec3::new(-5.0, 0.0, 5.0)) * Mat4::from_scale(scale),
-                )
+                .add_instance(object, Mat4::identity())
                 .unwrap();
 
-            self.scene.serialize("models/dragon.scene").unwrap();
+            self.scene.serialize("models/sponza.scene").unwrap();
         }
-
-        let vert_shader = include_str!("shaders/mesh.vert");
-        let frag_shader = include_str!("shaders/mesh.frag");
 
         let vert_shader = self
             .compiler
-            .compile_from_string(vert_shader, ShaderKind::Vertex)
+            .compile_from_file("src/shaders/mesh.vert", ShaderKind::Vertex)
             .unwrap();
         let frag_shader = self
             .compiler
-            .compile_from_string(frag_shader, ShaderKind::Fragment)
+            .compile_from_file("src/shaders/mesh.frag", ShaderKind::Fragment)
             .unwrap();
+
+        /*
+               let vert_shader = self
+            .compiler
+            .compile_from_file("shaders/mesh.vert", ShaderKind::Vertex)
+            .unwrap();
+        let frag_shader = self
+            .compiler
+            .compile_from_file("shaders/mesh.frag", ShaderKind::Fragment)
+            .unwrap();
+        */
 
         let vert_module = device.create_shader_module(vert_shader.as_slice());
         let frag_module = device.create_shader_module(frag_shader.as_slice());
@@ -241,9 +230,37 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
                             dynamic: false,
                         },
                     },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStage::FRAGMENT,
+                        ty: BindingType::Sampler {
+                            comparison: false
+                        },
+                    }
                 ],
                 label: Some("uniform-layout"),
             }));
+
+        self.texture_bind_group_layout = Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("texture-bind-group-layout"),
+            bindings: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStage::FRAGMENT, // Albedo texture
+                ty: BindingType::SampledTexture {
+                    component_type: TextureComponentType::Uint,
+                    multisampled: false,
+                    dimension: TextureViewDimension::D2,
+                },
+            }, BindGroupLayoutEntry { // Normal texture
+                binding: 1,
+                visibility: ShaderStage::FRAGMENT,
+                ty: BindingType::SampledTexture {
+                    component_type: TextureComponentType::Uint,
+                    multisampled: false,
+                    dimension: TextureViewDimension::D2,
+                },
+            }],
+        }));
 
         self.output_texture = Some(device.create_texture(&TextureDescriptor {
             label: Some("output-texture"),
@@ -283,6 +300,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
             bind_group_layouts: &[
                 self.bind_group_layout.as_ref().unwrap(),
                 self.triangle_bind_group_layout.as_ref().unwrap(),
+                self.texture_bind_group_layout.as_ref().unwrap()
             ],
         }));
 
@@ -385,7 +403,42 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
 
         self.staging_buffer = Some(staging_buffer.finish());
         self.uniform_buffer = Some(uniform_buffer);
-        self.material_buffer = Some(self.scene.get_material_list().create_wgpu_buffer(device));
+        self.material_buffer = Some(self.scene.get_material_list().create_wgpu_buffer(device, queue));
+        self.material_textures = self.scene.get_material_list().create_wgpu_textures(device, queue);
+        self.material_texture_views = self.material_textures.iter().map(|tex| {
+            tex.create_default_view()
+        }).collect();
+        self.material_texture_sampler = Some(device.create_sampler(&SamplerDescriptor {
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::Repeat,
+            address_mode_w: AddressMode::Repeat,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: FilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 4.0,
+            compare: CompareFunction::Undefined,
+        }));
+        self.material_bind_groups = (0..self.scene.get_material_list().len()).map(|i| {
+            let material = &self.scene.get_material_list()[i];
+            let albedo_tex = material.diffuse_tex.max(0) as usize;
+            let normal_tex = material.normal_tex.max(0) as usize;
+
+            let albedo_view = &self.material_texture_views[albedo_tex];
+            let normal_view = &self.material_texture_views[normal_tex];
+
+            device.create_bind_group(&BindGroupDescriptor {
+                label: None,
+                bindings: &[Binding {
+                    binding: 0,
+                    resource: BindingResource::TextureView(albedo_view),
+                }, Binding {
+                    binding: 1,
+                    resource: BindingResource::TextureView(normal_view),
+                }],
+                layout: self.texture_bind_group_layout.as_ref().unwrap(),
+            })
+        }).collect();
 
         self.vertex_buffers = self.scene.create_vertex_buffers(device, queue);
         self.instance_buffers = self.scene.create_wgpu_instances_buffer(device, queue);
@@ -414,6 +467,10 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
                         range: 0..(*size),
                     },
                 },
+                Binding {
+                    binding: 2,
+                    resource: BindingResource::Sampler(self.material_texture_sampler.as_ref().unwrap()),
+                }
             ],
             label: Some("mesh-bind-group-descriptor"),
         }));
@@ -422,22 +479,19 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("blit-layout"),
-            bindings: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::SampledTexture {
-                        multisampled: false,
-                        component_type: wgpu::TextureComponentType::Uint,
-                        dimension: wgpu::TextureViewDimension::D2,
-                    },
+            bindings: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStage::FRAGMENT,
+                ty: wgpu::BindingType::SampledTexture {
+                    multisampled: false,
+                    component_type: wgpu::TextureComponentType::Uint,
+                    dimension: wgpu::TextureViewDimension::D2,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler { comparison: false },
-                },
-            ],
+            }, wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStage::FRAGMENT,
+                ty: wgpu::BindingType::Sampler { comparison: false },
+            }],
         });
 
         self.output_sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
@@ -460,11 +514,10 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
                     resource: wgpu::BindingResource::TextureView(
                         self.output_texture_view.as_ref().unwrap(),
                     ),
-                },
-                Binding {
+                }, Binding {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(self.output_sampler.as_ref().unwrap()),
-                },
+                }
             ],
             layout: &bind_group_layout,
         });
@@ -535,7 +588,6 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         requests: &mut VecDeque<Request>,
     ) {
         use wgpu::*;
-        self.camera.far_plane = 1e2;
 
         let mapping = self.staging_buffer.as_ref().unwrap().map_write(0, 64);
         let matrix = self.camera.get_rh_matrix();
@@ -666,6 +718,15 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         }
 
         let elapsed = self.timer.elapsed_in_millis();
+
+        if states.pressed(KeyCode::RBracket) {
+            self.camera.speed += elapsed / 10.0;
+        }
+        if states.pressed(KeyCode::LBracket) {
+            self.camera.speed -= elapsed / 10.0;
+        }
+        self.camera.speed = self.camera.speed.max(0.1);
+
         self.fps.add_sample(1000.0 / elapsed);
         let avg = self.fps.get_average();
         self.timer.reset();

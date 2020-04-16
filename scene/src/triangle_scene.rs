@@ -63,44 +63,61 @@ impl TriangleScene {
         let materials = &mut self.materials;
 
         if extension == "obj" {
-            let cached_object = path.with_extension("rm");
-            let cached_file = File::open(cached_object.as_path());
-            if cached_file.is_err() {
+            #[cfg(feature = "object_caching")] {
+                let cached_object = path.with_extension("rm");
+                let cached_file = File::open(cached_object.as_path());
+                if cached_file.is_err() {
+                    let obj = Obj::new(path, materials);
+                    if obj.is_err() {
+                        println!("Obj error: {}", obj.err().unwrap());
+                        return None;
+                    }
+
+                    let obj = obj.unwrap();
+                    let mesh = obj.into_mesh();
+                    let encoded: Vec<u8> = bincode::serialize(&mesh).unwrap();
+                    let mut file = File::create(cached_object.as_path()).unwrap();
+                    file.write_all(encoded.as_slice()).unwrap();
+                    let result = self.add_object(mesh);
+                    return Some(result);
+                }
+
+                let cached_file = cached_file.unwrap();
+                let reader = BufReader::new(cached_file);
+
+                let object: Result<RastMesh, _> = bincode::deserialize_from(reader);
+                if object.is_err() {
+                    let obj = Obj::new(path, materials);
+                    if obj.is_err() {
+                        println!("Obj error: {}", obj.err().unwrap());
+                        return None;
+                    }
+
+                    let obj = obj.unwrap();
+                    let mesh = obj.into_mesh();
+                    let encoded: Vec<u8> = bincode::serialize(&mesh).unwrap();
+                    let mut file = File::create(cached_object.as_path()).unwrap();
+                    file.write_all(encoded.as_slice()).unwrap();
+                    let result = self.add_object(mesh);
+                    return Some(result);
+                }
+
+                let object = object.unwrap();
+                return Some(self.add_object(object));
+            }
+
+            #[cfg(not(feature = "object_caching"))] {
                 let obj = Obj::new(path, materials);
                 if obj.is_err() {
+                    println!("Obj error: {}", obj.err().unwrap());
                     return None;
                 }
 
                 let obj = obj.unwrap();
                 let mesh = obj.into_mesh();
-                let encoded: Vec<u8> = bincode::serialize(&mesh).unwrap();
-                let mut file = File::create(cached_object.as_path()).unwrap();
-                file.write_all(encoded.as_slice()).unwrap();
                 let result = self.add_object(mesh);
                 return Some(result);
             }
-
-            let cached_file = cached_file.unwrap();
-            let reader = BufReader::new(cached_file);
-
-            let object: Result<RastMesh, _> = bincode::deserialize_from(reader);
-            if object.is_err() {
-                let obj = Obj::new(path, materials);
-                if obj.is_err() {
-                    return None;
-                }
-
-                let obj = obj.unwrap();
-                let mesh = obj.into_mesh();
-                let encoded: Vec<u8> = bincode::serialize(&mesh).unwrap();
-                let mut file = File::create(cached_object.as_path()).unwrap();
-                file.write_all(encoded.as_slice()).unwrap();
-                let result = self.add_object(mesh);
-                return Some(result);
-            }
-
-            let object = object.unwrap();
-            return Some(self.add_object(object));
         }
 
         None
@@ -358,6 +375,7 @@ impl TriangleScene {
                 size_in_bytes: object.buffer_size(),
                 buffer: triangle_buffer,
                 bounds: object.bounds(),
+                meshes: object.meshes.clone(),
             });
         }
 

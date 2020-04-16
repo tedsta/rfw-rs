@@ -26,6 +26,7 @@ pub struct Camera {
     focal_distance: f32,
     pub near_plane: f32,
     pub far_plane: f32,
+    pub speed: f32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -38,7 +39,6 @@ pub struct CameraView {
     pub spread_angle: f32,
     pub epsilon: f32,
     pub inv_width: f32,
-
     pub inv_height: f32,
 }
 
@@ -150,8 +150,9 @@ impl Camera {
             aspect_ratio: 1.0,
             aperture: 0.0001,
             focal_distance: 1.0,
-            near_plane: 1e-2,
-            far_plane: 1e4,
+            near_plane: 1.0,
+            far_plane: 1e5,
+            speed: 1.0,
         }
     }
 
@@ -167,7 +168,8 @@ impl Camera {
             aperture: 0.0001,
             focal_distance: 1.0,
             near_plane: 1e-2,
-            far_plane: 1e4,
+            far_plane: 1e5,
+            speed: 1.0,
         }
     }
 
@@ -224,6 +226,7 @@ impl Camera {
     }
 
     pub fn translate_relative(&mut self, delta: Vec3) {
+        let delta = delta * self.speed;
         let (right, up, forward) = self.calculate_matrix();
         self.pos = (Vec3::from(self.pos)
             + (delta.x() * right + delta.y() * up + delta.z() * forward))

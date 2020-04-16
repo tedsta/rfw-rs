@@ -13,6 +13,7 @@ pub struct Material {
 
     pub opacity: f32,
     pub roughness: f32,
+
     pub diffuse_tex: i32,
     pub normal_tex: i32,
 }

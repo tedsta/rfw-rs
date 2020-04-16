@@ -122,10 +122,23 @@ impl<'a> CompilerBuilder<'a> {
     }
 
     pub fn build(self) -> Compiler<'a> {
-        Compiler {
+        let mut compiler = Compiler {
             compiler: shaderc::Compiler::new().unwrap(),
             options: self.options,
-        }
+        };
+
+        compiler.options.set_include_callback(
+            |requested_source, include_type, requesting_source, include_depth| {
+                Compiler::include_callback(
+                    requested_source,
+                    include_type,
+                    requesting_source,
+                    include_depth,
+                )
+            },
+        );
+
+        compiler
     }
 }
 
@@ -163,7 +176,7 @@ impl<'a> Compiler<'a> {
         );
     }
 
-    fn include_callback(
+    pub fn include_callback(
         requested_source: &str,
         include_type: shaderc::IncludeType,
         requesting_source: &str,

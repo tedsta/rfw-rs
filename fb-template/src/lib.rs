@@ -170,7 +170,7 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
 
     let (device, mut queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         extensions: wgpu::Extensions {
-            anisotropic_filtering: false,
+            anisotropic_filtering: true,
         },
         limits: wgpu::Limits::default(),
     }));
@@ -183,7 +183,7 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
         format: wgpu::TextureFormat::Bgra8UnormSrgb,
         width: start_width,
         height: start_height,
-        present_mode: wgpu::PresentMode::Mailbox,
+        present_mode: wgpu::PresentMode::Immediate,
     };
 
     app.init(

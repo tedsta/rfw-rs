@@ -232,28 +232,28 @@ mod tests {
 
         let camera = Camera::zero();
 
-        let frustrum: FrustrumG = FrustrumG::from_matrix(camera.get_gl_matrix());
+        let frustrum: FrustrumG = FrustrumG::from_matrix(camera.get_lh_matrix());
 
-        let point_behind = Vec3::new(0.0, 0.0, -1.0);
-        let point_in_front = Vec3::new(0.0, 0.0, 1.0);
+        let point_behind = glam::Vec3::new(0.0, 0.0, -1.0);
+        let point_in_front = glam::Vec3::new(0.0, 0.0, 1.0);
         let aabb_in_front = AABB {
-            min: Vec3::new(0.2, 0.2, 5.0).into(),
+            min: glam::Vec3::new(0.2, 0.2, 5.0).into(),
             left_first: 0,
-            max: Vec3::new(0.2, 0.2, 5.0).into(),
+            max: glam::Vec3::new(0.2, 0.2, 5.0).into(),
             count: 0,
         };
 
         let aabb_in_back = AABB {
-            min: Vec3::new(-1.0, 0.0, -2.0).into(),
+            min: glam::Vec3::new(-1.0, 0.0, -2.0).into(),
             left_first: 0,
-            max: Vec3::new(1.0, 0.0, -2.0).into(),
+            max: glam::Vec3::new(1.0, 0.0, -2.0).into(),
             count: 0,
         };
 
         let aabb_half = AABB {
-            min: Vec3::new(-5.0, 0.0, 2.0).into(),
+            min: glam::Vec3::new(-5.0, 0.0, 2.0).into(),
             left_first: 0,
-            max: Vec3::new(0.0, 0.0, 2.0).into(),
+            max: glam::Vec3::new(0.0, 0.0, 2.0).into(),
             count: 0,
         };
 

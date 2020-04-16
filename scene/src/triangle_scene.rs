@@ -7,7 +7,7 @@ use bvh::{Bounds, RayPacket4, ShadowPacket4, AABB, BVH, MBVH};
 use glam::*;
 
 use serde::{Deserialize, Serialize};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::{
     collections::HashSet, error::Error, fs::File, io::prelude::*, io::BufReader, path::Path,
 };
@@ -369,15 +369,15 @@ impl TriangleScene {
     }
 
     pub fn get_object<T>(&self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&RastMesh>),
+        where
+            T: FnMut(Option<&RastMesh>),
     {
         cb(self.objects.get(index));
     }
 
     pub fn get_object_mut<T>(&mut self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&mut RastMesh>),
+        where
+            T: FnMut(Option<&mut RastMesh>),
     {
         cb(self.objects.get_mut(index));
         self.flags.set_flag(SceneFlags::Dirty);
@@ -640,15 +640,15 @@ impl RTTriangleScene {
     }
 
     pub fn get_object<T>(&self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&RTMesh>),
+        where
+            T: FnMut(Option<&RTMesh>),
     {
         cb(self.objects.get(index));
     }
 
     pub fn get_object_mut<T>(&mut self, index: usize, mut cb: T)
-    where
-        T: FnMut(Option<&mut RTMesh>),
+        where
+            T: FnMut(Option<&mut RTMesh>),
     {
         cb(self.objects.get_mut(index));
         self.flags.set_flag(SceneFlags::Dirty);

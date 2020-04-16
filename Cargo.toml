@@ -7,6 +7,10 @@ edition = "2018"
 [profile.release]
 debug = true
 
+# Non-release compilation profile for any non-workspace member.
+[profile.dev.package."*"]
+opt-level = 3
+
 [dependencies]
 bvh = { path = "bvh" }
 scene = { path = "scene" }

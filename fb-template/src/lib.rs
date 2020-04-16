@@ -166,7 +166,7 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
         },
         wgpu::BackendBit::PRIMARY,
     ))
-    .unwrap();
+        .unwrap();
 
     let (device, mut queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         extensions: wgpu::Extensions {
@@ -196,34 +196,6 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
     );
 
     let mut swap_chain = device.create_swap_chain(&surface, &sc_descriptor);
-
-    // let hidpi_factor = window.scale_factor();
-    // let mut imgui = imgui::Context::create();
-    // let font_size = (13.0 * hidpi_factor) as f32;
-    // imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
-
-    // imgui.fonts().add_font(&[FontSource::DefaultFontData {
-    //     config: Some(imgui::FontConfig {
-    //         oversample_h: 1,
-    //         pixel_snap_h: true,
-    //         size_pixels: font_size,
-    //         ..Default::default()
-    //     }),
-    // }]);
-
-    // let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
-
-    // platform.attach_window(
-    //     imgui.io_mut(),
-    //     &window,
-    //     imgui_winit_support::HiDpiMode::Default,
-    // );
-
-    // let mut renderer =
-    //     imgui_wgpu::Renderer::new(&mut imgui, &device, &mut queue, sc_descriptor.format, None);
-
-    // let mut last_frame = Instant::now();
-    // let mut last_cursor = None;
 
     let mut resized = false;
 
@@ -261,30 +233,6 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
                 app.mouse_button_handling(&mouse_button_handler, &mut requests);
 
                 let output_texture = swap_chain.get_next_texture().unwrap();
-
-                // last_frame = imgui.io_mut().update_delta_time(last_frame);
-
-                // platform
-                //     .prepare_frame(imgui.io_mut(), &window)
-                //     .expect("Failed to prepare ImGui frame.");
-                // let ui = imgui.frame();
-
-                // app.imgui(&ui);
-
-                // if last_cursor != Some(ui.mouse_cursor()) {
-                //     last_cursor = Some(ui.mouse_cursor());
-                //     platform.prepare_render(&ui, &window);
-                // }
-
-                // let mut encoder =
-                //     device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                //         label: Some("")
-                //     });
-
-                // renderer
-                //     .render(ui.render(), &mut device, &mut encoder, &output_texture.view)
-                //     .expect("ImGui render failed.");
-                // command_buffers.push(encoder.finish());
 
                 app.render(&output_texture, &device, &mut requests);
 
@@ -341,20 +289,20 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
             }
             Event::WindowEvent {
                 event:
-                    WindowEvent::MouseWheel {
-                        delta: winit::event::MouseScrollDelta::LineDelta(x, y),
-                        ..
-                    },
+                WindowEvent::MouseWheel {
+                    delta: winit::event::MouseScrollDelta::LineDelta(x, y),
+                    ..
+                },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(x as f64, y as f64, &mut requests);
             }
             Event::WindowEvent {
                 event:
-                    WindowEvent::MouseWheel {
-                        delta: winit::event::MouseScrollDelta::PixelDelta(delta),
-                        ..
-                    },
+                WindowEvent::MouseWheel {
+                    delta: winit::event::MouseScrollDelta::PixelDelta(delta),
+                    ..
+                },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(delta.x, delta.y, &mut requests);
@@ -403,7 +351,7 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
         },
         wgpu::BackendBit::PRIMARY,
     ))
-    .unwrap();
+        .unwrap();
 
     app.init(width, height);
 
@@ -554,34 +502,6 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
     let mut render_texture = device.create_texture(&tex_descriptor);
     let mut render_texture_view = render_texture.create_default_view();
 
-    // let hidpi_factor = window.scale_factor();
-    // let mut imgui = imgui::Context::create();
-    // let font_size = (13.0 * hidpi_factor) as f32;
-    // imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
-
-    // imgui.fonts().add_font(&[FontSource::DefaultFontData {
-    //     config: Some(imgui::FontConfig {
-    //         oversample_h: 1,
-    //         pixel_snap_h: true,
-    //         size_pixels: font_size,
-    //         ..Default::default()
-    //     }),
-    // }]);
-
-    // let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
-
-    // platform.attach_window(
-    //     imgui.io_mut(),
-    //     &window,
-    //     imgui_winit_support::HiDpiMode::Default,
-    // );
-
-    // let mut renderer =
-    // imgui_wgpu::Renderer::new(&mut imgui, &device, &mut queue, wgpu::TextureFormat::, None);
-
-    // let mut last_frame = Instant::now();
-    // let mut last_cursor = None;
-
     let mut resized = false;
 
     event_loop.run(move |event, _, control_flow| {
@@ -716,24 +636,6 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
                     render_pass.draw(0..6, 0..1);
                 }
 
-                // last_frame = imgui.io_mut().update_delta_time(last_frame);
-
-                // platform
-                //     .prepare_frame(imgui.io_mut(), &window)
-                //     .expect("Failed to prepare ImGui frame.");
-                // let ui = imgui.frame();
-
-                // app.imgui(&ui);
-
-                // if last_cursor != Some(ui.mouse_cursor()) {
-                //     last_cursor = Some(ui.mouse_cursor());
-                //     platform.prepare_render(&ui, &window);
-                // }
-
-                // renderer
-                //     .render(ui.render(), &mut device, &mut encoder, &output_texture.view)
-                //     .expect("ImGui render failed.");
-
                 queue.submit(&[encoder.finish()]);
             }
             Event::WindowEvent {
@@ -777,20 +679,20 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
             }
             Event::WindowEvent {
                 event:
-                    WindowEvent::MouseWheel {
-                        delta: winit::event::MouseScrollDelta::LineDelta(x, y),
-                        ..
-                    },
+                WindowEvent::MouseWheel {
+                    delta: winit::event::MouseScrollDelta::LineDelta(x, y),
+                    ..
+                },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(x as f64, y as f64);
             }
             Event::WindowEvent {
                 event:
-                    WindowEvent::MouseWheel {
-                        delta: winit::event::MouseScrollDelta::PixelDelta(delta),
-                        ..
-                    },
+                WindowEvent::MouseWheel {
+                    delta: winit::event::MouseScrollDelta::PixelDelta(delta),
+                    ..
+                },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(delta.x, delta.y);
@@ -803,7 +705,5 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
             }
             _ => (),
         }
-
-        // platform.handle_event(imgui.io_mut(), &window, &event);
     });
 }

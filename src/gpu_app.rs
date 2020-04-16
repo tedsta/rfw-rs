@@ -162,24 +162,24 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         } else {
             let (object, scale) = {
                 #[cfg(not(debug_assertions))]
-                {
-                    (
-                        self.scene
-                            .load_mesh("models/dragon.obj")
-                            .expect("Could not load dragon.obj"),
-                        Vec3::splat(5.0),
-                    )
-                }
+                    {
+                        (
+                            self.scene
+                                .load_mesh("models/dragon.obj")
+                                .expect("Could not load dragon.obj"),
+                            Vec3::splat(5.0),
+                        )
+                    }
 
                 #[cfg(debug_assertions)]
-                {
-                    (
-                        self.scene
-                            .load_mesh("models/sphere.obj")
-                            .expect("Could not load sphere.obj"),
-                        Vec3::splat(0.05),
-                    )
-                }
+                    {
+                        (
+                            self.scene
+                                .load_mesh("models/sphere.obj")
+                                .expect("Could not load sphere.obj"),
+                            Vec3::splat(0.05),
+                        )
+                    }
             };
 
             let _object = self
@@ -589,25 +589,24 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         &mut self,
         _states: &MouseButtonHandler,
         _requests: &mut VecDeque<Request>,
-    ) {
-    }
+    ) {}
 
     fn key_handling(&mut self, states: &KeyHandler, requests: &mut VecDeque<Request>) {
         #[cfg(target_os = "macos")]
-        {
-            if states.pressed(KeyCode::LWin) && states.pressed(KeyCode::Q) {
-                requests.push_back(Request::Exit);
-                return;
+            {
+                if states.pressed(KeyCode::LWin) && states.pressed(KeyCode::Q) {
+                    requests.push_back(Request::Exit);
+                    return;
+                }
             }
-        }
 
         #[cfg(any(target_os = "linux", target_os = "windows"))]
-        {
-            if states.pressed(KeyCode::LAlt) && states.pressed(KeyCode::F4) {
-                requests.push_back(Request::Exit);
-                return;
+            {
+                if states.pressed(KeyCode::LAlt) && states.pressed(KeyCode::F4) {
+                    requests.push_back(Request::Exit);
+                    return;
+                }
             }
-        }
 
         if states.pressed(KeyCode::Escape) {
             requests.push_back(Request::Exit);
@@ -680,8 +679,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         _delta_x: f64,
         _delta_y: f64,
         _requests: &mut VecDeque<Request>,
-    ) {
-    }
+    ) {}
 
     fn scroll_handling(&mut self, _dx: f64, dy: f64, _requests: &mut VecDeque<Request>) {
         self.camera

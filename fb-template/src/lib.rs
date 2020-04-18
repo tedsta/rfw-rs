@@ -164,12 +164,11 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
             compatible_surface: Some(&surface),
         },
         wgpu::BackendBit::PRIMARY,
-    ))
-        .unwrap();
+    )).unwrap();
 
     let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         extensions: wgpu::Extensions {
-            anisotropic_filtering: true,
+            anisotropic_filtering: false,
         },
         limits: wgpu::Limits::default(),
     }));

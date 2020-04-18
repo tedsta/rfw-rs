@@ -138,9 +138,7 @@ impl GPUScene {
             triangle_bind_group_layout,
         };
 
-        println!("{}", 578);
         gpu_scene.synchronize(scene, device, queue);
-        println!("{}", 579);
         gpu_scene
     }
 
@@ -641,7 +639,7 @@ impl GPUScene {
                 ],
                 index_format: IndexFormat::Uint32,
             },
-            sample_count: 4,
+            sample_count: 1,
             sample_mask: !0,
             alpha_to_coverage_enabled: false,
         });

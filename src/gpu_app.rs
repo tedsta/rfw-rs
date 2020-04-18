@@ -191,8 +191,6 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
                 alpha_to_coverage_enabled: false,
             }),
         );
-
-        println!("Created blit pipeline.");
     }
 
     fn render(
@@ -372,7 +370,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
             },
             array_layer_count: 1,
             mip_level_count: 1,
-            sample_count: 4,
+            sample_count: 1,
             dimension: TextureDimension::D2,
             format: Self::OUTPUT_FORMAT,
             usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,

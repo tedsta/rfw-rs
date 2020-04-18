@@ -1,6 +1,6 @@
 use crate::objects::*;
 use crate::scene::*;
-use crate::{utils::*, MaterialList, Camera, FrustrumG, FrustrumResult};
+use crate::{utils::*, Camera, FrustrumG, FrustrumResult, MaterialList};
 use bvh::Ray;
 
 use bvh::{Bounds, RayPacket4, ShadowPacket4, AABB, BVH, MBVH};
@@ -31,6 +31,7 @@ pub struct GPUScene {
     pub staging_buffer: wgpu::Buffer,
 
     pub render_pipeline: wgpu::RenderPipeline,
+    pub render_pipeline_layout: wgpu::PipelineLayout,
     pub uniform_bind_group: wgpu::BindGroup,
 
     pub instance_bind_groups: Vec<wgpu::BindGroup>,
@@ -49,7 +50,106 @@ pub struct GPUScene {
 }
 
 impl GPUScene {
-    pub fn synchronize(&mut self, scene: &TriangleScene, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn new(
+        scene: &TriangleScene,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+    ) -> Self {
+        use wgpu::*;
+
+        let uniform_buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("triangle-uniform-buffer"),
+            size: std::mem::size_of::<Mat4>() as BufferAddress,
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        });
+
+        let staging_buffer = device.create_buffer_mapped(&BufferDescriptor {
+            label: Some("staging-buffer"),
+            size: std::mem::size_of::<Mat4>() as BufferAddress,
+            usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
+        });
+        staging_buffer.data.copy_from_slice(unsafe {
+            let matrix = Mat4::identity();
+            std::slice::from_raw_parts(
+                matrix.as_ref().as_ptr() as *const u8,
+                std::mem::size_of::<Mat4>(),
+            )
+        });
+        let staging_buffer = staging_buffer.finish();
+
+        let uniform_bind_group_layout = Self::create_uniform_bind_group_layout(device);
+        let triangle_bind_group_layout = Self::create_instance_bind_group_layout(device);
+        let texture_bind_group_layout = Self::create_texture_bind_group_layout(device);
+        let (render_pipeline_layout, render_pipeline) = Self::create_render_pipeline(
+            device,
+            output_format,
+            depth_format,
+            &uniform_bind_group_layout,
+            &triangle_bind_group_layout,
+            &texture_bind_group_layout,
+        );
+
+        let material_buffer = scene.materials.create_buffer(device, queue);
+        let material_texture_sampler = Self::create_texture_sampler(device);
+
+        let uniform_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            layout: &uniform_bind_group_layout,
+            bindings: &[
+                Binding {
+                    binding: 0,
+                    resource: BindingResource::Buffer {
+                        buffer: &uniform_buffer,
+                        range: 0..64,
+                    },
+                },
+                Binding {
+                    binding: 1,
+                    resource: BindingResource::Buffer {
+                        buffer: &material_buffer.1,
+                        range: 0..(material_buffer.0),
+                    },
+                },
+                Binding {
+                    binding: 2,
+                    resource: BindingResource::Sampler(&material_texture_sampler),
+                },
+            ],
+            label: Some("mesh-bind-group-descriptor"),
+        });
+
+        let mut gpu_scene = GPUScene {
+            uniform_buffer,
+            staging_buffer,
+            render_pipeline,
+            render_pipeline_layout,
+            uniform_bind_group,
+            instance_bind_groups: Vec::new(),
+            instance_buffers: Vec::new(),
+            vertex_buffers: Vec::new(),
+            material_buffer,
+            material_textures: Vec::new(),
+            material_texture_views: Vec::new(),
+            material_texture_sampler,
+            material_bind_groups: Vec::new(),
+            uniform_bind_group_layout,
+            texture_bind_group_layout,
+            triangle_bind_group_layout,
+        };
+
+        println!("{}", 578);
+        gpu_scene.synchronize(scene, device, queue);
+        println!("{}", 579);
+        gpu_scene
+    }
+
+    pub fn synchronize(
+        &mut self,
+        scene: &TriangleScene,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
         use wgpu::*;
 
         let vertex_buffers = scene.create_vertex_buffers(device, queue);
@@ -60,10 +160,12 @@ impl GPUScene {
             instance_buffers.as_slice(),
         );
 
-        { // Materials
+        {
+            // Materials
             self.material_buffer = scene.materials.create_buffer(device, queue);
             self.material_textures = scene.materials.create_textures(device, queue);
-            self.material_texture_views = self.material_textures
+            self.material_texture_views = self
+                .material_textures
                 .iter()
                 .map(|tex| tex.create_default_view())
                 .collect();
@@ -113,7 +215,7 @@ impl GPUScene {
                     Binding {
                         binding: 2,
                         resource: BindingResource::Sampler(&self.material_texture_sampler),
-                    }
+                    },
                 ],
                 label: Some("mesh-bind-group-descriptor"),
             });
@@ -124,8 +226,35 @@ impl GPUScene {
         self.instance_bind_groups = instance_bind_groups;
     }
 
-    pub fn record_render(&self, camera: &Camera, encoder: &mut wgpu::CommandEncoder, output: &wgpu::TextureView, depth_texture: &wgpu::TextureView) {
-        let frustrum: FrustrumG = FrustrumG::from_matrix(camera.get_rh_matrix());
+    pub fn record_render(
+        &self,
+        camera: &Camera,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        output: &wgpu::TextureView,
+        depth_texture: &wgpu::TextureView,
+    ) {
+        let mapping = self.staging_buffer.map_write(0, 64);
+        let matrix = camera.get_rh_matrix();
+        let frustrum: FrustrumG = FrustrumG::from_matrix(matrix);
+
+        device.poll(wgpu::Maintain::Wait);
+
+        if let Ok(mut mapping) = futures::executor::block_on(mapping) {
+            let slice = mapping.as_slice();
+            slice.copy_from_slice(unsafe {
+                std::slice::from_raw_parts(matrix.as_ref().as_ptr() as *const u8, 64)
+            });
+        }
+
+        encoder.copy_buffer_to_buffer(
+            &self.staging_buffer,
+            0,
+            &self.uniform_buffer,
+            0,
+            std::mem::size_of::<Mat4>() as u64,
+        );
+
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                 attachment: output,
@@ -186,10 +315,16 @@ impl GPUScene {
         }
     }
 
-    pub fn render(&self, camera: &Camera, device: &wgpu::Device, output: &wgpu::TextureView, depth_texture: &wgpu::TextureView) -> wgpu::CommandBuffer {
+    pub fn render(
+        &self,
+        camera: &Camera,
+        device: &wgpu::Device,
+        output: &wgpu::TextureView,
+        depth_texture: &wgpu::TextureView,
+    ) -> wgpu::CommandBuffer {
         let mapping = self.staging_buffer.map_write(0, 64);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("render-command")
+            label: Some("render-command"),
         });
 
         let matrix = camera.get_rh_matrix();
@@ -323,6 +458,7 @@ impl GPUScene {
                     },
                 },
                 BindGroupLayoutEntry {
+                    // Texture sampler
                     binding: 2,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler { comparison: false },
@@ -338,8 +474,9 @@ impl GPUScene {
             label: Some("texture-bind-group-layout"),
             bindings: &[
                 BindGroupLayoutEntry {
+                    // Albedo texture
                     binding: 0,
-                    visibility: ShaderStage::FRAGMENT, // Albedo texture
+                    visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::SampledTexture {
                         component_type: TextureComponentType::Uint,
                         multisampled: false,
@@ -377,48 +514,60 @@ impl GPUScene {
 
     fn create_render_pipeline(
         device: &wgpu::Device,
+        output_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
         uniform_layout: &wgpu::BindGroupLayout,
         triangle_layout: &wgpu::BindGroupLayout,
         texture_layout: &wgpu::BindGroupLayout,
-    ) -> wgpu::RenderPipeline {
-        use wgpu::*;
+    ) -> (wgpu::PipelineLayout, wgpu::RenderPipeline) {
         use shaderc::*;
+        use wgpu::*;
 
         let mut compiler = shaderc::Compiler::new().unwrap();
 
-        let vert_shader = include_str!("../shaders/mesh.vert");
-        let frag_shader = include_str!("../shaders/mesh.frag");
+        let vert_shader = include_str!("../../shaders/mesh.vert");
+        let frag_shader = include_str!("../../shaders/mesh.frag");
 
         let mut compile_options = shaderc::CompileOptions::new().unwrap();
-        compile_options.set_optimization_level(OptimizationLevel::Performance);
+        if cfg!(debug_assertions) {
+            compile_options.set_optimization_level(OptimizationLevel::Zero);
+            compile_options.set_generate_debug_info();
+        } else {
+            compile_options.set_optimization_level(OptimizationLevel::Performance);
+        }
 
-        let vert_shader = compiler.compile_into_spirv(
+        let vert_shader = match compiler.compile_into_spirv(
             vert_shader,
             ShaderKind::Vertex,
             "shaders/mesh.vert",
             "main",
             Some(&compile_options),
-        ).expect("Could not compile vertex shader");
-        let frag_shader = compiler.compile_into_spirv(
+        ) {
+            Ok(shader) => shader,
+            Err(e) => {
+                panic!("Could not compile shaders/mesh.vert: {}", e);
+            }
+        };
+        let frag_shader = match compiler.compile_into_spirv(
             frag_shader,
             ShaderKind::Fragment,
             "shaders/mesh.frag",
             "main",
             Some(&compile_options),
-        ).expect("Could not compile fragment shader");
+        ) {
+            Ok(shader) => shader,
+            Err(e) => {
+                panic!("Could not compile shaders/mesh.frag: {}", e);
+            }
+        };
 
         let vert_module = device.create_shader_module(vert_shader.as_binary());
         let frag_module = device.create_shader_module(frag_shader.as_binary());
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            bind_group_layouts: &[
-                &uniform_layout,
-                &triangle_layout,
-                &texture_layout,
-            ],
+            bind_group_layouts: &[&uniform_layout, &triangle_layout, &texture_layout],
         });
-
-        device.create_render_pipeline(&RenderPipelineDescriptor {
+        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             layout: &pipeline_layout,
             vertex_stage: ProgrammableStageDescriptor {
                 module: &vert_module,
@@ -437,13 +586,13 @@ impl GPUScene {
             }),
             primitive_topology: PrimitiveTopology::TriangleList,
             color_states: &[ColorStateDescriptor {
-                format: TextureFormat::Bgra8UnormSrgb, // TODO: Make this dynamic based on output settings
+                format: output_format,
                 alpha_blend: BlendDescriptor::REPLACE,
                 color_blend: BlendDescriptor::REPLACE,
                 write_mask: ColorWrite::ALL,
             }],
             depth_stencil_state: Some(DepthStencilStateDescriptor {
-                format: TextureFormat::Depth32Float,
+                format: depth_format,
                 depth_write_enabled: true,
                 depth_compare: CompareFunction::LessEqual,
                 stencil_front: StencilStateFaceDescriptor::IGNORE,
@@ -495,90 +644,9 @@ impl GPUScene {
             sample_count: 4,
             sample_mask: !0,
             alpha_to_coverage_enabled: false,
-        })
-    }
-}
-
-impl From<(&TriangleScene, &wgpu::Device, &wgpu::Queue)> for GPUScene {
-    fn from((scene, device, queue): (&TriangleScene, &wgpu::Device, &wgpu::Queue)) -> Self {
-        use wgpu::*;
-
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("triangle-uniform-buffer"),
-            size: std::mem::size_of::<Mat4>() as BufferAddress,
-            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
         });
 
-        let staging_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("staging-buffer"),
-            size: std::mem::size_of::<Mat4>() as BufferAddress,
-            usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
-        });
-        println!("{}", 517);
-
-        let uniform_bind_group_layout = Self::create_uniform_bind_group_layout(device);
-        let triangle_bind_group_layout = Self::create_instance_bind_group_layout(device);
-        let texture_bind_group_layout = Self::create_texture_bind_group_layout(device);
-        let render_pipeline = Self::create_render_pipeline(
-            device,
-            &uniform_bind_group_layout,
-            &triangle_bind_group_layout,
-            &texture_bind_group_layout,
-        );
-        println!("{}", 528);
-
-        let material_buffer = scene.materials.create_buffer(device, queue);
-        let material_texture_sampler = Self::create_texture_sampler(device);
-        println!("{}", 532);
-
-        let uniform_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            layout: &uniform_bind_group_layout,
-            bindings: &[
-                Binding {
-                    binding: 0,
-                    resource: BindingResource::Buffer {
-                        buffer: &uniform_buffer,
-                        range: 0..64,
-                    },
-                },
-                Binding {
-                    binding: 1,
-                    resource: BindingResource::Buffer {
-                        buffer: &material_buffer.1,
-                        range: 0..(material_buffer.0),
-                    },
-                },
-                Binding {
-                    binding: 2,
-                    resource: BindingResource::Sampler(&material_texture_sampler),
-                }
-            ],
-            label: Some("mesh-bind-group-descriptor"),
-        });
-        println!("{}", 558);
-
-        let mut gpu_scene = GPUScene {
-            uniform_buffer,
-            staging_buffer,
-            render_pipeline,
-            uniform_bind_group,
-            instance_bind_groups: Vec::new(),
-            instance_buffers: Vec::new(),
-            vertex_buffers: Vec::new(),
-            material_buffer,
-            material_textures: Vec::new(),
-            material_texture_views: Vec::new(),
-            material_texture_sampler,
-            material_bind_groups: Vec::new(),
-            uniform_bind_group_layout,
-            texture_bind_group_layout,
-            triangle_bind_group_layout,
-        };
-
-        println!("{}", 578);
-        gpu_scene.synchronize(scene, device, queue);
-        println!("{}", 579);
-        gpu_scene
+        (pipeline_layout, pipeline)
     }
 }
 
@@ -619,63 +687,16 @@ impl TriangleScene {
         let materials = &mut self.materials;
 
         if extension == "obj" {
-            #[cfg(feature = "object_caching")]
-                {
-                    let cached_object = path.with_extension("rm");
-                    let cached_file = File::open(cached_object.as_path());
-                    if cached_file.is_err() {
-                        let obj = Obj::new(path, materials);
-                        if obj.is_err() {
-                            println!("Obj error: {}", obj.err().unwrap());
-                            return None;
-                        }
+            let obj = Obj::new(path, materials);
+            if obj.is_err() {
+                println!("Obj error: {}", obj.err().unwrap());
+                return None;
+            }
 
-                        let obj = obj.unwrap();
-                        let mesh = obj.into_mesh();
-                        let encoded: Vec<u8> = bincode::serialize(&mesh).unwrap();
-                        let mut file = File::create(cached_object.as_path()).unwrap();
-                        file.write_all(encoded.as_slice()).unwrap();
-                        let result = self.add_object(mesh);
-                        return Some(result);
-                    }
-
-                    let cached_file = cached_file.unwrap();
-                    let reader = BufReader::new(cached_file);
-
-                    let object: Result<RastMesh, _> = bincode::deserialize_from(reader);
-                    if object.is_err() {
-                        let obj = Obj::new(path, materials);
-                        if obj.is_err() {
-                            println!("Obj error: {}", obj.err().unwrap());
-                            return None;
-                        }
-
-                        let obj = obj.unwrap();
-                        let mesh = obj.into_mesh();
-                        let encoded: Vec<u8> = bincode::serialize(&mesh).unwrap();
-                        let mut file = File::create(cached_object.as_path()).unwrap();
-                        file.write_all(encoded.as_slice()).unwrap();
-                        let result = self.add_object(mesh);
-                        return Some(result);
-                    }
-
-                    let object = object.unwrap();
-                    return Some(self.add_object(object));
-                }
-
-            #[cfg(not(feature = "object_caching"))]
-                {
-                    let obj = Obj::new(path, materials);
-                    if obj.is_err() {
-                        println!("Obj error: {}", obj.err().unwrap());
-                        return None;
-                    }
-
-                    let obj = obj.unwrap();
-                    let mesh = obj.into_mesh();
-                    let result = self.add_object(mesh);
-                    return Some(result);
-                }
+            let obj = obj.unwrap();
+            let mesh = obj.into_mesh();
+            let result = self.add_object(mesh);
+            return Some(result);
         }
 
         None
@@ -831,7 +852,7 @@ impl TriangleScene {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             bindings: &[
                 BindGroupLayoutEntry {
-// Instance matrices
+                    // Instance matrices
                     binding: 0,
                     visibility: ShaderStage::VERTEX,
                     ty: BindingType::StorageBuffer {
@@ -840,7 +861,7 @@ impl TriangleScene {
                     },
                 },
                 BindGroupLayoutEntry {
-// Instance inverse matrices
+                    // Instance inverse matrices
                     binding: 1,
                     visibility: ShaderStage::VERTEX,
                     ty: BindingType::StorageBuffer {
@@ -941,15 +962,15 @@ impl TriangleScene {
     }
 
     pub fn get_object<T>(&self, index: usize, mut cb: T)
-        where
-            T: FnMut(Option<&RastMesh>),
+    where
+        T: FnMut(Option<&RastMesh>),
     {
         cb(self.objects.get(index));
     }
 
     pub fn get_object_mut<T>(&mut self, index: usize, mut cb: T)
-        where
-            T: FnMut(Option<&mut RastMesh>),
+    where
+        T: FnMut(Option<&mut RastMesh>),
     {
         cb(self.objects.get_mut(index));
         self.flags.set_flag(SceneFlags::Dirty);
@@ -1084,14 +1105,24 @@ impl TriangleScene {
         Ok(object)
     }
 
-// pub fn create_intersector(&self) -> TriangleIntersector {
-//     TriangleIntersector {
-//         objects: self.objects.as_slice(),
-//         instances: self.instances.as_slice(),
-//         bvh: &self.bvh,
-//         mbvh: &self.mbvh,
-//     }
-// }
+    pub fn create_gpu_scene(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+    ) -> GPUScene {
+        GPUScene::new(&self, device, queue, output_format, depth_format)
+    }
+
+    // pub fn create_intersector(&self) -> TriangleIntersector {
+    //     TriangleIntersector {
+    //         objects: self.objects.as_slice(),
+    //         instances: self.instances.as_slice(),
+    //         bvh: &self.bvh,
+    //         mbvh: &self.mbvh,
+    //     }
+    // }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1212,15 +1243,15 @@ impl RTTriangleScene {
     }
 
     pub fn get_object<T>(&self, index: usize, mut cb: T)
-        where
-            T: FnMut(Option<&RTMesh>),
+    where
+        T: FnMut(Option<&RTMesh>),
     {
         cb(self.objects.get(index));
     }
 
     pub fn get_object_mut<T>(&mut self, index: usize, mut cb: T)
-        where
-            T: FnMut(Option<&mut RTMesh>),
+    where
+        T: FnMut(Option<&mut RTMesh>),
     {
         cb(self.objects.get_mut(index));
         self.flags.set_flag(SceneFlags::Dirty);
@@ -1343,7 +1374,7 @@ impl RTTriangleScene {
 
     pub fn build_bvh(&mut self) {
         if self.flags.has_flag(SceneFlags::Dirty) {
-// Need to rebuild bvh
+            // Need to rebuild bvh
             let aabbs: Vec<AABB> = self
                 .instances
                 .iter()

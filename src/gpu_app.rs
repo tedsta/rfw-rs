@@ -1,42 +1,28 @@
 use fb_template::{
-    shader::*, DeviceFramebuffer, KeyCode, KeyHandler, MouseButtonHandler, Request, Ui,
+    shader::*, DeviceFramebuffer, KeyCode, KeyHandler, MouseButtonHandler, Request,
 };
 use glam::*;
 
-use crate::camera::*;
 use crate::utils::*;
-use futures::executor::block_on;
-use scene::{InstanceMatrices, TriangleScene, VertexBuffer, VertexData};
+use scene::{TriangleScene, Camera, GPUScene};
 use std::collections::VecDeque;
 
 pub struct GPUApp<'a> {
     width: u32,
     height: u32,
     compiler: Compiler<'a>,
-    pipeline: Option<wgpu::RenderPipeline>,
     blit_pipeline: Option<wgpu::RenderPipeline>,
     blit_bind_group_layout: Option<wgpu::BindGroupLayout>,
     blit_bind_group: Option<wgpu::BindGroup>,
-    pipeline_layout: Option<wgpu::PipelineLayout>,
-    triangle_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    bind_group_layout: Option<wgpu::BindGroupLayout>,
-    bind_group: Option<wgpu::BindGroup>,
-    vertex_buffers: Vec<VertexBuffer>,
-    instance_bind_groups: Vec<wgpu::BindGroup>,
-    instance_buffers: Vec<InstanceMatrices>,
-    uniform_buffer: Option<wgpu::Buffer>,
-    staging_buffer: Option<wgpu::Buffer>,
+
     output_texture: Option<wgpu::Texture>,
     output_texture_view: Option<wgpu::TextureView>,
     output_sampler: Option<wgpu::Sampler>,
+
     depth_texture: Option<wgpu::Texture>,
     depth_texture_view: Option<wgpu::TextureView>,
-    material_buffer: Option<(wgpu::BufferAddress, wgpu::Buffer)>,
-    material_textures: Vec<wgpu::Texture>,
-    material_texture_views: Vec<wgpu::TextureView>,
-    material_texture_sampler: Option<wgpu::Sampler>,
-    material_bind_groups: Vec<wgpu::BindGroup>,
-    texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
+
+    gpu_scene: Option<GPUScene>,
     scene: TriangleScene,
     camera: Camera,
     timer: Timer,
@@ -58,99 +44,20 @@ impl<'a> GPUApp<'a> {
             width: 1,
             height: 1,
             compiler,
-            pipeline: None,
             blit_pipeline: None,
             blit_bind_group_layout: None,
             blit_bind_group: None,
-            pipeline_layout: None,
-            triangle_bind_group_layout: None,
-            bind_group_layout: None,
-            bind_group: None,
-            vertex_buffers: Vec::new(),
-            instance_bind_groups: Vec::new(),
-            instance_buffers: Vec::new(),
-            uniform_buffer: None,
-            staging_buffer: None,
             output_texture: None,
             output_texture_view: None,
             output_sampler: None,
             depth_texture: None,
             depth_texture_view: None,
-            material_buffer: None,
-            material_textures: Vec::new(),
-            material_texture_views: Vec::new(),
-            material_texture_sampler: None,
-            material_bind_groups: Vec::new(),
-            texture_bind_group_layout: None,
             scene,
+            gpu_scene: None,
             camera: Camera::zero(),
             timer: Timer::new(),
             sc_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             fps: Averager::with_capacity(25),
-        }
-    }
-}
-
-impl<'a> GPUApp<'a> {
-    fn record_render_pipeline(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        let pipeline = self.pipeline.as_ref().unwrap();
-        let frustrum: FrustrumG = FrustrumG::from_matrix(self.camera.get_rh_matrix());
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                    attachment: self.output_texture_view.as_ref().unwrap(),
-                    resolve_target: None,
-                    load_op: wgpu::LoadOp::Clear,
-                    store_op: wgpu::StoreOp::Store,
-                    clear_color: wgpu::Color {
-                        r: 0.0 as f64,
-                        g: 0.0 as f64,
-                        b: 0.0 as f64,
-                        a: 0.0 as f64,
-                    },
-                }],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-                    attachment: self.depth_texture_view.as_ref().unwrap(),
-                    depth_load_op: wgpu::LoadOp::Clear,
-                    depth_store_op: wgpu::StoreOp::Store,
-                    clear_depth: 1.0,
-                    stencil_load_op: wgpu::LoadOp::Clear,
-                    stencil_store_op: wgpu::StoreOp::Clear,
-                    clear_stencil: 0,
-                }),
-            });
-            render_pass.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[]);
-            render_pass.set_pipeline(pipeline);
-
-            for i in 0..self.instance_buffers.len() {
-                let instance_buffers: &InstanceMatrices = self.instance_buffers.get(i).unwrap();
-                if instance_buffers.count <= 0 {
-                    continue;
-                }
-
-                let instance_bind_group = self.instance_bind_groups.get(i).unwrap();
-                let vb: &VertexBuffer = &self.vertex_buffers[i];
-
-                render_pass.set_bind_group(1, instance_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, &vb.buffer, 0, 0);
-                render_pass.set_vertex_buffer(1, &vb.buffer, 0, 0);
-                render_pass.set_vertex_buffer(2, &vb.buffer, 0, 0);
-                render_pass.set_vertex_buffer(3, &vb.buffer, 0, 0);
-
-                for i in 0..instance_buffers.count {
-                    let bounds = vb.bounds.transformed(instance_buffers.actual_matrices[i]);
-                    if frustrum.aabb_in_frustrum(&bounds) != FrustrumResult::Outside {
-                        let i = i as u32;
-                        for mesh in vb.meshes.iter() {
-                            if frustrum.aabb_in_frustrum(&mesh.bounds) != FrustrumResult::Outside {
-                                render_pass.set_bind_group(2, &self.material_bind_groups[mesh.mat_id as usize], &[]);
-                                render_pass.draw(mesh.first..mesh.last, i..(i + 1));
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -161,12 +68,13 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         width: u32,
         height: u32,
         device: &wgpu::Device,
-        queue: &mut wgpu::Queue,
+        queue: &wgpu::Queue,
         sc_format: wgpu::TextureFormat,
         _requests: &mut VecDeque<Request>,
     ) {
         self.width = width;
         self.height = height;
+
         self.camera.resize(width, height);
 
         use wgpu::*;
@@ -180,319 +88,34 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
                 .load_mesh("models/sponza/sponza.obj")
                 .expect("Could not load sponza.obj");
 
-            let _object = self
-                .scene
-                .add_instance(object, Mat4::identity())
-                .unwrap();
+            let _object = self.scene.add_instance(object, Mat4::identity()).unwrap();
 
             self.scene.serialize("models/sponza.scene").unwrap();
         }
+        println!("Loaded scene.");
+        let gpu_scene = GPUScene::from((&self.scene, device, queue));
+        self.gpu_scene = Some(gpu_scene);
+        println!("Created gpu scene.");
 
-        let vert_shader = self
-            .compiler
-            .compile_from_file("src/shaders/mesh.vert", ShaderKind::Vertex)
-            .unwrap();
-        let frag_shader = self
-            .compiler
-            .compile_from_file("src/shaders/mesh.frag", ShaderKind::Fragment)
-            .unwrap();
-
-        /*
-               let vert_shader = self
-            .compiler
-            .compile_from_file("shaders/mesh.vert", ShaderKind::Vertex)
-            .unwrap();
-        let frag_shader = self
-            .compiler
-            .compile_from_file("shaders/mesh.frag", ShaderKind::Fragment)
-            .unwrap();
-        */
-
-        let vert_module = device.create_shader_module(vert_shader.as_slice());
-        let frag_module = device.create_shader_module(frag_shader.as_slice());
-
-        self.triangle_bind_group_layout = Some(self.scene.create_bind_group_layout(device));
-        self.bind_group_layout =
-            Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                bindings: &[
-                    BindGroupLayoutEntry {
-                        // Matrix buffer
-                        binding: 0,
-                        visibility: ShaderStage::VERTEX,
-                        ty: BindingType::UniformBuffer { dynamic: false },
-                    },
-                    BindGroupLayoutEntry {
-                        // Material buffer
-                        binding: 1,
-                        visibility: ShaderStage::FRAGMENT,
-                        ty: BindingType::StorageBuffer {
-                            readonly: true,
-                            dynamic: false,
-                        },
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStage::FRAGMENT,
-                        ty: BindingType::Sampler {
-                            comparison: false
-                        },
-                    }
-                ],
-                label: Some("uniform-layout"),
-            }));
-
-        self.texture_bind_group_layout = Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("texture-bind-group-layout"),
-            bindings: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStage::FRAGMENT, // Albedo texture
-                ty: BindingType::SampledTexture {
-                    component_type: TextureComponentType::Uint,
-                    multisampled: false,
-                    dimension: TextureViewDimension::D2,
-                },
-            }, BindGroupLayoutEntry { // Normal texture
-                binding: 1,
-                visibility: ShaderStage::FRAGMENT,
-                ty: BindingType::SampledTexture {
-                    component_type: TextureComponentType::Uint,
-                    multisampled: false,
-                    dimension: TextureViewDimension::D2,
-                },
-            }],
-        }));
-
-        self.output_texture = Some(device.create_texture(&TextureDescriptor {
-            label: Some("output-texture"),
-            size: Extent3d {
-                width: self.width,
-                height: self.height,
-                depth: 1,
-            },
-            array_layer_count: 1,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: sc_format,
-            usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
-        }));
-
-        self.output_texture_view =
-            Some(self.output_texture.as_ref().unwrap().create_default_view());
-
-        self.depth_texture = Some(device.create_texture(&TextureDescriptor {
-            size: Extent3d {
-                width: self.width,
-                height: self.height,
-                depth: 1,
-            },
-            array_layer_count: 1,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: TextureUsage::OUTPUT_ATTACHMENT,
-            label: None,
-        }));
-        self.depth_texture_view = Some(self.depth_texture.as_ref().unwrap().create_default_view());
-
-        self.pipeline_layout = Some(device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            bind_group_layouts: &[
-                self.bind_group_layout.as_ref().unwrap(),
-                self.triangle_bind_group_layout.as_ref().unwrap(),
-                self.texture_bind_group_layout.as_ref().unwrap()
-            ],
-        }));
-
-        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            layout: self.pipeline_layout.as_ref().unwrap(),
-            vertex_stage: ProgrammableStageDescriptor {
-                module: &vert_module,
-                entry_point: "main",
-            },
-            fragment_stage: Some(ProgrammableStageDescriptor {
-                module: &frag_module,
-                entry_point: "main",
-            }),
-            rasterization_state: Some(RasterizationStateDescriptor {
-                front_face: FrontFace::Ccw,
-                cull_mode: CullMode::Back,
-                depth_bias: 0,
-                depth_bias_slope_scale: 0.0,
-                depth_bias_clamp: 0.0,
-            }),
-            primitive_topology: PrimitiveTopology::TriangleList,
-            color_states: &[ColorStateDescriptor {
-                format: sc_format,
-                alpha_blend: BlendDescriptor::REPLACE,
-                color_blend: BlendDescriptor::REPLACE,
-                write_mask: ColorWrite::ALL,
-            }],
-            depth_stencil_state: Some(DepthStencilStateDescriptor {
-                format: TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::LessEqual,
-                stencil_front: StencilStateFaceDescriptor::IGNORE,
-                stencil_back: StencilStateFaceDescriptor::IGNORE,
-                stencil_read_mask: 0,
-                stencil_write_mask: 0,
-            }),
-            vertex_state: VertexStateDescriptor {
-                vertex_buffers: &[
-                    VertexBufferDescriptor {
-                        stride: std::mem::size_of::<VertexData>() as BufferAddress,
-                        step_mode: InputStepMode::Vertex,
-                        attributes: &[VertexAttributeDescriptor {
-                            offset: 0,
-                            format: VertexFormat::Float4,
-                            shader_location: 0,
-                        }],
-                    },
-                    VertexBufferDescriptor {
-                        stride: std::mem::size_of::<VertexData>() as BufferAddress,
-                        step_mode: InputStepMode::Vertex,
-                        attributes: &[VertexAttributeDescriptor {
-                            offset: 16,
-                            format: VertexFormat::Float3,
-                            shader_location: 1,
-                        }],
-                    },
-                    VertexBufferDescriptor {
-                        stride: std::mem::size_of::<VertexData>() as BufferAddress,
-                        step_mode: InputStepMode::Vertex,
-                        attributes: &[VertexAttributeDescriptor {
-                            offset: 28,
-                            format: VertexFormat::Uint,
-                            shader_location: 2,
-                        }],
-                    },
-                    VertexBufferDescriptor {
-                        stride: std::mem::size_of::<VertexData>() as BufferAddress,
-                        step_mode: InputStepMode::Vertex,
-                        attributes: &[VertexAttributeDescriptor {
-                            offset: 32,
-                            format: VertexFormat::Float2,
-                            shader_location: 3,
-                        }],
-                    },
-                ],
-                index_format: IndexFormat::Uint32,
-            },
-            sample_count: 1,
-            sample_mask: !0,
-            alpha_to_coverage_enabled: false,
-        });
-
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("vp-uniform"),
-            size: 64,
-            usage: BufferUsage::UNIFORM | BufferUsage::COPY_DST,
-        });
-
-        let matrix = self.camera.get_rh_matrix();
-
-        let staging_buffer = device.create_buffer_mapped(&BufferDescriptor {
-            label: Some("staging-buffer"),
-            size: 64 as BufferAddress,
-            usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
-        });
-
-        staging_buffer.data.copy_from_slice(unsafe {
-            std::slice::from_raw_parts(matrix.as_ref().as_ptr() as *const u8, 64)
-        });
-
-        self.staging_buffer = Some(staging_buffer.finish());
-        self.uniform_buffer = Some(uniform_buffer);
-        self.material_buffer = Some(self.scene.get_material_list().create_wgpu_buffer(device, queue));
-        self.material_textures = self.scene.get_material_list().create_wgpu_textures(device, queue);
-        self.material_texture_views = self.material_textures.iter().map(|tex| {
-            tex.create_default_view()
-        }).collect();
-        self.material_texture_sampler = Some(device.create_sampler(&SamplerDescriptor {
-            address_mode_u: AddressMode::Repeat,
-            address_mode_v: AddressMode::Repeat,
-            address_mode_w: AddressMode::Repeat,
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 4.0,
-            compare: CompareFunction::Undefined,
-        }));
-        self.material_bind_groups = (0..self.scene.get_material_list().len()).map(|i| {
-            let material = &self.scene.get_material_list()[i];
-            let albedo_tex = material.diffuse_tex.max(0) as usize;
-            let normal_tex = material.normal_tex.max(0) as usize;
-
-            let albedo_view = &self.material_texture_views[albedo_tex];
-            let normal_view = &self.material_texture_views[normal_tex];
-
-            device.create_bind_group(&BindGroupDescriptor {
-                label: None,
-                bindings: &[Binding {
-                    binding: 0,
-                    resource: BindingResource::TextureView(albedo_view),
-                }, Binding {
-                    binding: 1,
-                    resource: BindingResource::TextureView(normal_view),
-                }],
-                layout: self.texture_bind_group_layout.as_ref().unwrap(),
-            })
-        }).collect();
-
-        self.vertex_buffers = self.scene.create_vertex_buffers(device, queue);
-        self.instance_buffers = self.scene.create_wgpu_instances_buffer(device, queue);
-        self.instance_bind_groups = self.scene.create_bind_groups(
-            device,
-            self.triangle_bind_group_layout.as_ref().unwrap(),
-            &self.instance_buffers,
-        );
-
-        let (size, mat_buffer) = self.material_buffer.as_ref().unwrap();
-
-        self.bind_group = Some(device.create_bind_group(&BindGroupDescriptor {
-            layout: self.bind_group_layout.as_ref().unwrap(),
-            bindings: &[
-                Binding {
-                    binding: 0,
-                    resource: BindingResource::Buffer {
-                        buffer: self.uniform_buffer.as_ref().unwrap(),
-                        range: 0..64,
-                    },
-                },
-                Binding {
-                    binding: 1,
-                    resource: BindingResource::Buffer {
-                        buffer: mat_buffer,
-                        range: 0..(*size),
-                    },
-                },
-                Binding {
-                    binding: 2,
-                    resource: BindingResource::Sampler(self.material_texture_sampler.as_ref().unwrap()),
-                }
-            ],
-            label: Some("mesh-bind-group-descriptor"),
-        }));
-
-        self.pipeline = Some(render_pipeline);
-
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        self.blit_bind_group_layout = Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("blit-layout"),
-            bindings: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStage::FRAGMENT,
-                ty: wgpu::BindingType::SampledTexture {
-                    multisampled: false,
-                    component_type: wgpu::TextureComponentType::Uint,
-                    dimension: wgpu::TextureViewDimension::D2,
+            bindings: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    ty: wgpu::BindingType::SampledTexture {
+                        multisampled: false,
+                        component_type: wgpu::TextureComponentType::Uint,
+                        dimension: wgpu::TextureViewDimension::D2,
+                    },
                 },
-            }, wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStage::FRAGMENT,
-                ty: wgpu::BindingType::Sampler { comparison: false },
-            }],
-        });
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler { comparison: false },
+                },
+            ],
+        }));
 
         self.output_sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -506,24 +129,10 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
             compare: wgpu::CompareFunction::Never,
         }));
 
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("blit-bind-group"),
-            bindings: &[
-                Binding {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        self.output_texture_view.as_ref().unwrap(),
-                    ),
-                }, Binding {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(self.output_sampler.as_ref().unwrap()),
-                }
-            ],
-            layout: &bind_group_layout,
-        });
+        self.resize(width, height, device, _requests);
 
         let blit_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[self.blit_bind_group_layout.as_ref().unwrap()],
         });
 
         let vert_shader = include_str!("shaders/quad.vert");
@@ -577,8 +186,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
             }),
         );
 
-        self.blit_bind_group_layout = Some(bind_group_layout);
-        self.blit_bind_group = Some(bind_group);
+        println!("Created blit pipeline.");
     }
 
     fn render(
@@ -588,34 +196,11 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         requests: &mut VecDeque<Request>,
     ) {
         use wgpu::*;
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: Some("render-encoder") });
 
-        let mapping = self.staging_buffer.as_ref().unwrap().map_write(0, 64);
-        let matrix = self.camera.get_rh_matrix();
-
-        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("render"),
-        });
-
-        let staging_buffer = self.staging_buffer.as_ref().unwrap();
-        let uniform_buffer = self.uniform_buffer.as_ref().unwrap();
-
-        encoder.copy_buffer_to_buffer(staging_buffer, 0, uniform_buffer, 0, 64);
-
-        device.poll(wgpu::Maintain::Wait);
-
-        if let Ok(mut mapping) = block_on(mapping) {
-            let slice = mapping.as_slice();
-            slice.copy_from_slice(unsafe {
-                std::slice::from_raw_parts(matrix.as_ref().as_ptr() as *const u8, 64)
-            });
+        if let Some(scene) = self.gpu_scene.as_ref() {
+            scene.record_render(&self.camera, &mut encoder, self.output_texture_view.as_ref().unwrap(), self.depth_texture_view.as_ref().unwrap());
         }
-
-        if self.instance_buffers.is_empty() {
-            requests.push_back(Request::CommandBuffer(encoder.finish()));
-            return;
-        }
-
-        self.record_render_pipeline(&mut encoder);
 
         {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -710,22 +295,24 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         let view_change = view_change * elapsed * 0.001;
         let pos_change = pos_change * elapsed * 0.01;
 
+        let mut camera = &mut self.camera;
+
         if view_change != [0.0; 3].into() {
-            self.camera.translate_target(view_change);
+            camera.translate_target(view_change);
         }
         if pos_change != [0.0; 3].into() {
-            self.camera.translate_relative(pos_change);
+            camera.translate_relative(pos_change);
         }
 
         let elapsed = self.timer.elapsed_in_millis();
 
         if states.pressed(KeyCode::RBracket) {
-            self.camera.speed += elapsed / 10.0;
+            camera.speed += elapsed / 10.0;
         }
         if states.pressed(KeyCode::LBracket) {
-            self.camera.speed -= elapsed / 10.0;
+            camera.speed -= elapsed / 10.0;
         }
-        self.camera.speed = self.camera.speed.max(0.1);
+        camera.speed = camera.speed.max(0.1);
 
         self.fps.add_sample(1000.0 / elapsed);
         let avg = self.fps.get_average();
@@ -743,8 +330,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
     ) {}
 
     fn scroll_handling(&mut self, _dx: f64, dy: f64, _requests: &mut VecDeque<Request>) {
-        self.camera
-            .change_fov(self.camera.get_fov() - (dy as f32) * 0.01);
+        self.camera.change_fov(self.camera.get_fov() - (dy as f32) * 0.01);
     }
 
     fn resize(
@@ -769,7 +355,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
             },
             array_layer_count: 1,
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: 4,
             dimension: TextureDimension::D2,
             format: self.sc_format,
             usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
@@ -815,6 +401,4 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         self.depth_texture_view = Some(new_view);
         self.depth_texture = Some(new_texture);
     }
-
-    fn imgui(&mut self, _ui: &Ui) {}
 }

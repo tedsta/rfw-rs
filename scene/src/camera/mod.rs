@@ -2,9 +2,9 @@ use bvh::{Ray, RayPacket4};
 use glam::*;
 use std::f32::consts::PI;
 
-use scene::constants::DEFAULT_T_MAX;
+use crate::constants::DEFAULT_T_MAX;
 
-mod frustrum;
+pub mod frustrum;
 
 pub use frustrum::*;
 
@@ -200,7 +200,7 @@ impl Camera {
             right,
             spread_angle,
             up,
-            epsilon: scene::constants::EPSILON,
+            epsilon: crate::constants::EPSILON,
             p1,
             inv_width: 1.0 / self.width as f32,
             inv_height: 1.0 / self.height as f32,

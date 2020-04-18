@@ -1,4 +1,3 @@
-use crate::camera::*;
 use crate::utils::*;
 use fb_template::{
     HostFramebuffer, KeyCode, KeyHandler, MouseButtonCode, MouseButtonHandler, Request, Ui,
@@ -6,7 +5,7 @@ use fb_template::{
 use glam::*;
 use rayon::prelude::*;
 use bvh::Ray;
-use scene::{RTTriangleScene, MaterialList, Quad, constants, Scene, BVHMode, ToMesh};
+use scene::{RTTriangleScene, MaterialList, Quad, constants, Scene, BVHMode, ToMesh, Camera};
 use std::error::Error;
 
 #[derive(Debug, Copy, Clone)]

@@ -96,21 +96,6 @@ impl From<[f32; 4]> for FrustrumPlane {
     }
 }
 
-enum FrustrumSide {
-    Top = 0,
-    Bottom = 1,
-    Left = 2,
-    Right = 3,
-    NearPlane = 4,
-    FarPlane = 5,
-}
-
-impl Into<usize> for FrustrumSide {
-    fn into(self) -> usize {
-        self as usize
-    }
-}
-
 pub struct FrustrumG {
     pub planes: [FrustrumPlane; 6],
 }

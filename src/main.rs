@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-mod camera;
 mod cpu_app;
 mod gpu_app;
 mod utils;

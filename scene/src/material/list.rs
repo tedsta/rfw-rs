@@ -6,7 +6,6 @@ use std::ops::{Index, IndexMut};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use image::GenericImageView;
-use rayon::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaterialList {
@@ -81,6 +80,7 @@ impl Texture {
 
 #[allow(dead_code)]
 impl MaterialList {
+    pub const MIP_LEVELS: usize = 5;
     pub fn new() -> MaterialList {
         let materials = vec![Material::new(
             vec3(1.0, 0.0, 0.0),
@@ -179,11 +179,13 @@ impl MaterialList {
             std::slice::from_raw_parts(bgra_image.as_ptr() as *const u32, (width * height) as usize)
         });
 
-        let tex = Texture {
+        let mut tex = Texture {
             width,
             height,
             data,
         };
+
+        tex.generate_mipmaps(Self::MIP_LEVELS);
 
         self.textures.push(tex);
         let index = self.textures.len() - 1;
@@ -198,8 +200,7 @@ impl MaterialList {
         0
     }
 
-    #[cfg(feature = "wgpu")]
-    pub fn create_wgpu_buffer(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::BufferAddress, wgpu::Buffer) {
+    pub fn create_buffer(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::BufferAddress, wgpu::Buffer) {
         use wgpu::*;
 
         let size = (self.materials.len() * std::mem::size_of::<Material>()) as BufferAddress;
@@ -229,13 +230,8 @@ impl MaterialList {
         (size, buffer)
     }
 
-    #[cfg(feature = "wgpu")]
-    pub fn create_wgpu_textures(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<wgpu::Texture> {
+    pub fn create_textures(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<wgpu::Texture> {
         use wgpu::*;
-
-        const MIP_LEVELS: usize = 5;
-
-        self.textures.par_iter_mut().for_each(|tex| { tex.generate_mipmaps(MIP_LEVELS); });
         let mut textures = Vec::new();
 
         let staging_size = self.textures.iter().map(|t| t.data.len()).sum::<usize>() * std::mem::size_of::<u32>();
@@ -259,7 +255,7 @@ impl MaterialList {
         });
 
         let mut offset = 0 as BufferAddress;
-        for (i, tex) in self.textures.iter_mut().enumerate() {
+        for (i, tex) in self.textures.iter().enumerate() {
             let texture = device.create_texture(&TextureDescriptor {
                 label: Some(format!("texture-{}", i).as_str()),
                 size: Extent3d { width: tex.width, height: tex.height, depth: 1 },
@@ -274,7 +270,7 @@ impl MaterialList {
             let mut width = tex.width;
             let mut height = tex.height;
             let mut local_offset = 0 as BufferAddress;
-            for i in 0..MIP_LEVELS {
+            for i in 0..Self::MIP_LEVELS {
                 encoder.copy_buffer_to_texture(BufferCopyView {
                     buffer: &staging_buffer,
                     offset: offset + local_offset * std::mem::size_of::<u32>() as BufferAddress,

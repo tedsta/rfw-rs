@@ -99,7 +99,7 @@ pub trait DeviceFramebuffer {
         width: u32,
         height: u32,
         device: &wgpu::Device,
-        queue: &mut wgpu::Queue,
+        queue: &wgpu::Queue,
         sc_format: wgpu::TextureFormat,
         requests: &mut VecDeque<Request>,
     );
@@ -131,7 +131,6 @@ pub trait DeviceFramebuffer {
         device: &wgpu::Device,
         requests: &mut VecDeque<Request>,
     );
-    fn imgui(&mut self, ui: &imgui::Ui);
 }
 
 pub fn run_device_app<T: 'static + DeviceFramebuffer>(
@@ -168,7 +167,7 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
     ))
         .unwrap();
 
-    let (device, mut queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         extensions: wgpu::Extensions {
             anisotropic_filtering: true,
         },
@@ -190,7 +189,7 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
         sc_descriptor.width,
         sc_descriptor.height,
         &device,
-        &mut queue,
+        &queue,
         sc_descriptor.format,
         &mut requests,
     );

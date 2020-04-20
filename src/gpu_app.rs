@@ -26,6 +26,7 @@ pub struct GPUApp<'a> {
     timer: Timer,
     sc_format: wgpu::TextureFormat,
     fps: Averager<f32>,
+    frame_time: Averager<f32>,
 }
 
 impl<'a> GPUApp<'a> {
@@ -59,6 +60,7 @@ impl<'a> GPUApp<'a> {
             timer: Timer::new(),
             sc_format: Self::OUTPUT_FORMAT,
             fps: Averager::with_capacity(25),
+            frame_time: Averager::with_capacity(25),
         }
     }
 }
@@ -327,10 +329,16 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         }
         camera.speed = camera.speed.max(0.1);
 
+        self.frame_time.add_sample(elapsed);
         self.fps.add_sample(1000.0 / elapsed);
-        let avg = self.fps.get_average();
+        let frame_time_avg = self.frame_time.get_average();
+        let fps_avg = self.fps.get_average();
         self.timer.reset();
-        requests.push_back(Request::TitleChange(format!("FPS: {:.2}", avg)))
+
+        requests.push_back(Request::TitleChange(format!(
+            "Frame time: {:.2} ms, FPS: {:.2}",
+            frame_time_avg, fps_avg
+        )))
     }
 
     fn mouse_handling(

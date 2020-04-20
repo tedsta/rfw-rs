@@ -164,7 +164,8 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
             compatible_surface: Some(&surface),
         },
         wgpu::BackendBit::PRIMARY,
-    )).unwrap();
+    ))
+    .unwrap();
 
     let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         extensions: wgpu::Extensions {
@@ -176,12 +177,14 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
     let mut requests: VecDeque<Request> = VecDeque::new();
     let mut command_buffers: Vec<wgpu::CommandBuffer> = Vec::new();
 
+    let output_format = wgpu::TextureFormat::Bgra8UnormSrgb;
+
     let mut sc_descriptor = wgpu::SwapChainDescriptor {
         usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        format: output_format,
         width: start_width,
         height: start_height,
-        present_mode: wgpu::PresentMode::Mailbox,
+        present_mode: wgpu::PresentMode::Immediate,
     };
 
     app.init(
@@ -287,20 +290,20 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
             }
             Event::WindowEvent {
                 event:
-                WindowEvent::MouseWheel {
-                    delta: winit::event::MouseScrollDelta::LineDelta(x, y),
-                    ..
-                },
+                    WindowEvent::MouseWheel {
+                        delta: winit::event::MouseScrollDelta::LineDelta(x, y),
+                        ..
+                    },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(x as f64, y as f64, &mut requests);
             }
             Event::WindowEvent {
                 event:
-                WindowEvent::MouseWheel {
-                    delta: winit::event::MouseScrollDelta::PixelDelta(delta),
-                    ..
-                },
+                    WindowEvent::MouseWheel {
+                        delta: winit::event::MouseScrollDelta::PixelDelta(delta),
+                        ..
+                    },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(delta.x, delta.y, &mut requests);
@@ -349,7 +352,7 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
         },
         wgpu::BackendBit::PRIMARY,
     ))
-        .unwrap();
+    .unwrap();
 
     app.init(width, height);
 
@@ -677,20 +680,20 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
             }
             Event::WindowEvent {
                 event:
-                WindowEvent::MouseWheel {
-                    delta: winit::event::MouseScrollDelta::LineDelta(x, y),
-                    ..
-                },
+                    WindowEvent::MouseWheel {
+                        delta: winit::event::MouseScrollDelta::LineDelta(x, y),
+                        ..
+                    },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(x as f64, y as f64);
             }
             Event::WindowEvent {
                 event:
-                WindowEvent::MouseWheel {
-                    delta: winit::event::MouseScrollDelta::PixelDelta(delta),
-                    ..
-                },
+                    WindowEvent::MouseWheel {
+                        delta: winit::event::MouseScrollDelta::PixelDelta(delta),
+                        ..
+                    },
                 window_id,
             } if window_id == window.id() => {
                 app.scroll_handling(delta.x, delta.y);

@@ -82,8 +82,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         self.camera.resize(width, height);
         self.sc_format = sc_format;
 
-        if let Ok(scene) = TriangleScene::deserialize("models/sponza.scene") {
-            println!("Loaded scene from cached file: models/sponza.scene");
+        if let Ok(scene) = TriangleScene::deserialize("sponza") {
             self.scene = scene;
         } else {
             let object = self
@@ -92,7 +91,7 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
                 .expect("Could not load sponza.obj");
 
             let _object = self.scene.add_instance(object, Mat4::identity()).unwrap();
-            self.scene.serialize("models/sponza.scene").unwrap();
+            self.scene.serialize("sponza").unwrap();
         }
 
         let gpu_scene = GPUScene::new(

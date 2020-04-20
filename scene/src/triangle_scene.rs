@@ -142,14 +142,12 @@ impl GPUScene {
         gpu_scene
     }
 
-    pub fn synchronize(
+    pub fn synchronize_meshes(
         &mut self,
         scene: &TriangleScene,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
-        use wgpu::*;
-
         let vertex_buffers = scene.create_vertex_buffers(device, queue);
         let instance_buffers = scene.create_instances_buffer(device, queue);
         let instance_bind_groups = scene.create_bind_groups(
@@ -158,70 +156,87 @@ impl GPUScene {
             instance_buffers.as_slice(),
         );
 
-        {
-            // Materials
-            self.material_buffer = scene.materials.create_buffer(device, queue);
-            self.material_textures = scene.materials.create_textures(device, queue);
-            self.material_texture_views = self
-                .material_textures
-                .iter()
-                .map(|tex| tex.create_default_view())
-                .collect();
-            self.material_bind_groups = (0..scene.materials.len())
-                .map(|i| {
-                    let material = &scene.materials[i];
-                    let albedo_tex = material.diffuse_tex.max(0) as usize;
-                    let normal_tex = material.normal_tex.max(0) as usize;
-
-                    let albedo_view = &self.material_texture_views[albedo_tex];
-                    let normal_view = &self.material_texture_views[normal_tex];
-
-                    device.create_bind_group(&BindGroupDescriptor {
-                        label: None,
-                        bindings: &[
-                            Binding {
-                                binding: 0,
-                                resource: BindingResource::TextureView(albedo_view),
-                            },
-                            Binding {
-                                binding: 1,
-                                resource: BindingResource::TextureView(normal_view),
-                            },
-                        ],
-                        layout: &self.texture_bind_group_layout,
-                    })
-                })
-                .collect();
-
-            self.uniform_bind_group = device.create_bind_group(&BindGroupDescriptor {
-                layout: &self.uniform_bind_group_layout,
-                bindings: &[
-                    Binding {
-                        binding: 0,
-                        resource: BindingResource::Buffer {
-                            buffer: &self.uniform_buffer,
-                            range: 0..64,
-                        },
-                    },
-                    Binding {
-                        binding: 1,
-                        resource: BindingResource::Buffer {
-                            buffer: &self.material_buffer.1,
-                            range: 0..(self.material_buffer.0),
-                        },
-                    },
-                    Binding {
-                        binding: 2,
-                        resource: BindingResource::Sampler(&self.material_texture_sampler),
-                    },
-                ],
-                label: Some("mesh-bind-group-descriptor"),
-            });
-        }
-
         self.vertex_buffers = vertex_buffers;
         self.instance_buffers = instance_buffers;
         self.instance_bind_groups = instance_bind_groups;
+    }
+
+    pub fn synchronize_materials(
+        &mut self,
+        scene: &TriangleScene,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        use wgpu::*;
+
+        // Materials
+        self.material_buffer = scene.materials.create_buffer(device, queue);
+        self.material_textures = scene.materials.create_textures(device, queue);
+        self.material_texture_views = self
+            .material_textures
+            .iter()
+            .map(|tex| tex.create_default_view())
+            .collect();
+        self.material_bind_groups = (0..scene.materials.len())
+            .map(|i| {
+                let material = &scene.materials[i];
+                let albedo_tex = material.diffuse_tex.max(0) as usize;
+                let normal_tex = material.normal_tex.max(0) as usize;
+
+                let albedo_view = &self.material_texture_views[albedo_tex];
+                let normal_view = &self.material_texture_views[normal_tex];
+
+                device.create_bind_group(&BindGroupDescriptor {
+                    label: None,
+                    bindings: &[
+                        Binding {
+                            binding: 0,
+                            resource: BindingResource::TextureView(albedo_view),
+                        },
+                        Binding {
+                            binding: 1,
+                            resource: BindingResource::TextureView(normal_view),
+                        },
+                    ],
+                    layout: &self.texture_bind_group_layout,
+                })
+            })
+            .collect();
+
+        self.uniform_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            layout: &self.uniform_bind_group_layout,
+            bindings: &[
+                Binding {
+                    binding: 0,
+                    resource: BindingResource::Buffer {
+                        buffer: &self.uniform_buffer,
+                        range: 0..std::mem::size_of::<Mat4>() as u64,
+                    },
+                },
+                Binding {
+                    binding: 1,
+                    resource: BindingResource::Buffer {
+                        buffer: &self.material_buffer.1,
+                        range: 0..(self.material_buffer.0),
+                    },
+                },
+                Binding {
+                    binding: 2,
+                    resource: BindingResource::Sampler(&self.material_texture_sampler),
+                },
+            ],
+            label: Some("mesh-bind-group-descriptor"),
+        });
+    }
+
+    pub fn synchronize(
+        &mut self,
+        scene: &TriangleScene,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        self.synchronize_meshes(scene, device, queue);
+        self.synchronize_materials(scene, device, queue);
     }
 
     pub fn record_render(
@@ -657,6 +672,8 @@ pub struct InstanceMatrices {
 
 #[allow(dead_code)]
 impl TriangleScene {
+    const FF_EXTENSION: &'static str = ".scenev1";
+
     pub fn new() -> TriangleScene {
         TriangleScene {
             objects: Vec::new(),
@@ -1091,13 +1108,19 @@ impl TriangleScene {
 
     pub fn serialize<S: AsRef<Path>>(&self, path: S) -> Result<(), Box<dyn Error>> {
         let encoded: Vec<u8> = bincode::serialize(self)?;
-        let mut file = File::create(path)?;
+
+        let mut output = OsString::from(path.as_ref().as_os_str());
+        output.push(Self::FF_EXTENSION);
+
+        let mut file = File::create(output)?;
         file.write_all(encoded.as_ref())?;
         Ok(())
     }
 
     pub fn deserialize<S: AsRef<Path>>(path: S) -> Result<Self, Box<dyn Error>> {
-        let file = File::open(path)?;
+        let mut input = OsString::from(path.as_ref().as_os_str());
+        input.push(Self::FF_EXTENSION);
+        let file = File::open(input)?;
         let reader = BufReader::new(file);
         let object: Self = bincode::deserialize_from(reader)?;
         Ok(object)

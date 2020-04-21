@@ -423,4 +423,8 @@ impl<'a> DeviceFramebuffer for GPUApp<'a> {
         self.depth_texture_view = Some(new_view);
         self.depth_texture = Some(new_texture);
     }
+
+    fn shutdown(&mut self) {
+
+    }
 }

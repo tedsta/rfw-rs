@@ -1,11 +1,11 @@
 use crate::utils::*;
 use fb_template::{
-    HostFramebuffer, KeyCode, KeyHandler, MouseButtonCode, MouseButtonHandler, Request, Ui,
+    HostFramebuffer, KeyCode, KeyHandler, MouseButtonCode, MouseButtonHandler, Request,
 };
 use glam::*;
 use rayon::prelude::*;
 use bvh::Ray;
-use scene::{RTTriangleScene, MaterialList, Quad, constants, Scene, BVHMode, ToMesh, Camera};
+use scene::{Quad, constants, Scene, BVHMode, ToMesh, Camera, TriangleScene, SerializableObject};
 use std::error::Error;
 
 #[derive(Debug, Copy, Clone)]
@@ -22,8 +22,7 @@ pub struct CPUApp {
     pixels: Vec<Vec4>,
     camera: Camera,
     timer: Timer,
-    scene: RTTriangleScene,
-    materials: MaterialList,
+    scene: TriangleScene,
     render_mode: RenderMode,
     fps: Averager<f32>,
     num_threads: usize,
@@ -32,39 +31,31 @@ pub struct CPUApp {
 
 impl CPUApp {
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let mut materials = MaterialList::new();
-        let scene_str = "models/dragon_sphere.rtscene";
+        let mut scene = TriangleScene::new();
 
-        let scene = if let Ok(scene) = RTTriangleScene::deserialize(scene_str) {
-            scene
-        } else {
-            let mut scene = RTTriangleScene::new();
-            let dragon = scene.load_mesh("models/dragon.obj", &mut materials, Some(50.0)).unwrap();
-            let _ = scene.add_instance(
-                dragon,
-                Mat4::from_translation(Vec3::new(0.0, 0.0, 5.0)) * Mat4::from_scale(Vec3::splat(0.1)),
-            ).unwrap();
+        let sphere = scene.load_mesh("models/sphere.obj").unwrap();
+        (-2..3).for_each(|x| {
+            (3..8).for_each(|z| {
+                let matrix = Mat4::from_translation(Vec3::new(x as f32 * 2.0, 0.0, z as f32 * 2.0)) * Mat4::from_scale(Vec3::splat(0.01));
+                scene.add_instance(sphere, matrix).unwrap();
+            })
+        });
 
-            let sphere = scene.load_mesh("models/sphere.obj", &mut materials, Some(0.01)).unwrap();
-            (-2..3).for_each(|x| {
-                (3..8).for_each(|z| {
-                    let matrix = Mat4::from_translation(Vec3::new(x as f32 * 2.0, 0.0, z as f32 * 2.0));
-                    scene.add_instance(sphere, matrix).unwrap();
-                })
-            });
-
-            let quad_mat_id = materials.add(Vec3::new(0.2, 0.2, 1.0), 1.0, Vec3::one(), 1.0) as u32;
-            let quad = Quad::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -2.0, 10.0), 10., 10.0, quad_mat_id)
-                .into_rt_mesh();
-            let quad = scene.add_object(quad);
-            let _ = scene.add_instance(quad, Mat4::identity()).unwrap();
-            scene.build_bvh();
-            scene.serialize(scene_str).unwrap();
-            scene
-        };
+        let quad_mat_id = scene.materials.add(Vec3::new(0.2, 0.2, 1.0), 1.0, Vec3::one(), 1.0) as u32;
+        let quad = Quad::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -2.0, 10.0), 10., 10.0, quad_mat_id)
+            .into_mesh();
+        let quad = scene.add_object(quad);
+        let _ = scene.add_instance(quad, Mat4::identity()).unwrap();
+        scene.build_bvh();
 
         let num_threads = num_cpus::get();
         let (width, height) = (1, 1);
+        let mut camera = match Camera::deserialize("cpu-camera") {
+            Ok(c) => c,
+            Err(_) => Camera::new(width, height)
+        };
+
+        camera.resize(width, height);
 
         Ok(Self {
             width,
@@ -72,10 +63,9 @@ impl CPUApp {
             packet_width: 4,
             packet_height: 1,
             pixels: vec![Vec4::zero(); (width * height) as usize],
-            camera: Camera::new(width, height),
+            camera,
             timer: Timer::new(),
             scene,
-            materials,
             render_mode: RenderMode::Scene,
             fps: Averager::with_capacity(25),
             num_threads,
@@ -106,7 +96,7 @@ impl CPUApp {
         let view = self.camera.get_view();
         let pixels = &mut self.pixels;
         let intersector = self.scene.create_intersector();
-        let _materials = &self.materials;
+        let _materials = &self.scene.materials;
         let width = self.width as usize;
 
         pixels
@@ -134,7 +124,7 @@ impl CPUApp {
         let view = self.camera.get_view();
         let pixels = &mut self.pixels;
         let intersector = self.scene.create_intersector();
-        let materials = &self.materials;
+        let materials = &self.scene.materials;
 
         let width = self.width;
 
@@ -346,8 +336,7 @@ impl HostFramebuffer for CPUApp {
         None
     }
 
-    fn imgui(&mut self, ui: &Ui) {
-        let mut opened = true;
-        ui.show_demo_window(&mut opened);
+    fn shutdown(&mut self) {
+        self.camera.serialize("cpu-camera").unwrap();
     }
 }

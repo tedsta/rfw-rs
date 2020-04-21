@@ -107,26 +107,26 @@ impl BVH {
     pub fn refit(&mut self, aabbs: &[AABB]) {
         for i in (0..self.nodes.len()).rev() {
             let mut aabb = AABB::new();
-            let left_first = self.nodes[i].get_left_first();
-            let count = self.nodes[i].get_count();
-            if left_first < 0 && count < 0 {
-                return;
-            }
-
-            aabb.left_first = left_first;
-            aabb.count = count;
-            if self.nodes[i].is_leaf() {
-                for i in 0..count {
-                    let prim_id = self.prim_indices[(left_first + i) as usize] as usize;
-                    aabb.grow_bb(&aabbs[prim_id]);
+            if let Some(left_first) = self.nodes[i].get_left_first() {
+                let count = self.nodes[i].get_count_unchecked();
+                if count < 0 {
+                    return;
                 }
-            } else if left_first >= 0 {
-                // Left node
-                aabb.grow_bb(&self.nodes[left_first as usize].bounds);
-                // Right node
-                aabb.grow_bb(&self.nodes[(left_first + 1) as usize].bounds);
-            }
 
+                aabb.left_first = left_first as i32;
+                aabb.count = count as i32;
+                if self.nodes[i].is_leaf() {
+                    for i in 0..count {
+                        let prim_id = self.prim_indices[(left_first + i as u32) as usize] as usize;
+                        aabb.grow_bb(&aabbs[prim_id]);
+                    }
+                } else {
+                    // Left node
+                    aabb.grow_bb(&self.nodes[left_first as usize].bounds);
+                    // Right node
+                    aabb.grow_bb(&self.nodes[(left_first + 1) as usize].bounds);
+                }
+            }
             self.nodes[i].bounds = aabb;
         }
     }

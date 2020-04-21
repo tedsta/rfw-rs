@@ -1,12 +1,11 @@
 use glam::*;
-use std::path::{Path, PathBuf};
 use std::error::Error;
+use std::path::{Path, PathBuf};
 
-use crate::utils::*;
 use crate::material::*;
-use crate::objects::RTMesh;
 use crate::objects::mesh::ToMesh;
-use crate::RastMesh;
+use crate::utils::*;
+use crate::Mesh;
 
 enum ObjFlags {
     HasNormals = 1,
@@ -29,25 +28,49 @@ pub struct Obj {
 }
 
 impl Obj {
-    pub fn new<T: AsRef<Path>>(path: T, mat_manager: &mut MaterialList) -> Result<Obj, Box<dyn Error>> {
+    pub fn new<T: AsRef<Path>>(
+        path: T,
+        mat_manager: &mut MaterialList,
+    ) -> Result<Obj, Box<dyn Error>> {
         let path = path.as_ref();
         let object = tobj::load_obj(path);
-        if let Err(e) = object { return Err(Box::new(e)); }
+        if let Err(e) = object {
+            return Err(Box::new(e));
+        }
         let (models, materials) = object.unwrap();
 
         let mut material_indices = vec![0; materials.len()];
 
         for (i, material) in materials.iter().enumerate() {
-            let color = vec3(material.diffuse[0], material.diffuse[1], material.diffuse[2]);
-            let specular = vec3(material.specular[0], material.specular[1], material.specular[2]);
+            let color = vec3(
+                material.diffuse[0],
+                material.diffuse[1],
+                material.diffuse[2],
+            );
+            let specular = vec3(
+                material.specular[0],
+                material.specular[1],
+                material.specular[2],
+            );
             let roughness = (material.shininess.log10() / 1000.0).max(0.0).min(1.0);
             let opacity = 1.0 - material.dissolve;
 
             let (d_path, n_path) = if let Some(parent) = path.parent() {
-                (parent.to_path_buf().join(material.diffuse_texture.as_str()).to_path_buf(),
-                 parent.to_path_buf().join(material.normal_texture.as_str()).to_path_buf())
+                (
+                    parent
+                        .to_path_buf()
+                        .join(material.diffuse_texture.as_str())
+                        .to_path_buf(),
+                    parent
+                        .to_path_buf()
+                        .join(material.normal_texture.as_str())
+                        .to_path_buf(),
+                )
             } else {
-                (PathBuf::from(material.diffuse_texture.as_str()), PathBuf::from(material.normal_texture.as_str()))
+                (
+                    PathBuf::from(material.diffuse_texture.as_str()),
+                    PathBuf::from(material.normal_texture.as_str()),
+                )
             };
 
             material_indices[i] = mat_manager.add_with_maps(
@@ -79,28 +102,32 @@ impl Obj {
                 let i1 = i0 + 1;
                 let i2 = i0 + 2;
 
-                let pos = [
-                    mesh.positions[i0],
-                    mesh.positions[i1],
-                    mesh.positions[i2],
-                ];
+                let pos = [mesh.positions[i0], mesh.positions[i1], mesh.positions[i2]];
 
                 let normal = if !mesh.normals.is_empty() {
                     flags.set_flag(ObjFlags::HasNormals);
                     [mesh.normals[i0], mesh.normals[i1], mesh.normals[i2]]
-                } else { [0.0; 3] };
+                } else {
+                    [0.0; 3]
+                };
 
                 let uv = if !mesh.texcoords.is_empty() {
                     flags.set_flag(ObjFlags::HasUvs);
                     [mesh.texcoords[idx * 2], mesh.texcoords[idx * 2 + 1]]
-                } else { [0.0; 2] };
+                } else {
+                    [0.0; 2]
+                };
 
                 vertices.push(pos.into());
                 normals.push(normal.into());
                 uvs.push(uv.into());
 
                 if i % 3 == 0 {
-                    let material_id = if mesh.material_id.is_some() { material_indices[mesh.material_id.unwrap()] } else { mat_manager.get_default() };
+                    let material_id = if mesh.material_id.is_some() {
+                        material_indices[mesh.material_id.unwrap()]
+                    } else {
+                        mat_manager.get_default()
+                    };
 
                     material_ids.push(material_id as u32);
                 }
@@ -121,17 +148,8 @@ impl Obj {
 }
 
 impl ToMesh for Obj {
-    fn into_rt_mesh(self) -> RTMesh {
-        RTMesh::new(
-            self.vertices.as_slice(),
-            self.normals.as_slice(),
-            self.uvs.as_slice(),
-            self.material_ids.as_slice(),
-        )
-    }
-
-    fn into_mesh(self) -> RastMesh {
-        RastMesh::new(
+    fn into_mesh(self) -> Mesh {
+        Mesh::new(
             self.vertices.as_slice(),
             self.normals.as_slice(),
             self.uvs.as_slice(),

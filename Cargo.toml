@@ -12,6 +12,7 @@ debug = true
 opt-level = 3
 
 [dependencies]
+clap = "2.33"
 bvh = { path = "bvh" }
 scene = { path = "scene" }
 fb-template = { path = "fb-template" }

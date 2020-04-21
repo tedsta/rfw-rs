@@ -1,5 +1,5 @@
 use glam::*;
-use crate::{ToMesh, RTMesh, RastMesh};
+use crate::{ToMesh, Mesh};
 
 pub struct Quad {
     pub normal: Vec3,
@@ -65,11 +65,7 @@ impl Quad {
 }
 
 impl ToMesh for Quad {
-    fn into_rt_mesh(self) -> RTMesh {
-        RTMesh::new(&self.vertices, &self.normals, &self.uvs, &self.material_ids)
-    }
-
-    fn into_mesh(self) -> RastMesh {
-        RastMesh::new(&self.vertices, &self.normals, &self.uvs, &self.material_ids)
+    fn into_mesh(self) -> Mesh {
+        Mesh::new(&self.vertices, &self.normals, &self.uvs, &self.material_ids)
     }
 }

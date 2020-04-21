@@ -88,7 +88,7 @@ pub trait HostFramebuffer {
     fn mouse_handling(&mut self, x: f64, y: f64, delta_x: f64, delta_y: f64) -> Option<Request>;
     fn scroll_handling(&mut self, dx: f64, dy: f64) -> Option<Request>;
     fn resize(&mut self, width: u32, height: u32) -> Option<Request>;
-    fn imgui(&mut self, ui: &imgui::Ui);
+    fn shutdown(&mut self);
 }
 
 pub trait DeviceFramebuffer {
@@ -131,6 +131,7 @@ pub trait DeviceFramebuffer {
         device: &wgpu::Device,
         requests: &mut VecDeque<Request>,
     );
+    fn shutdown(&mut self);
 }
 
 pub fn run_device_app<T: 'static + DeviceFramebuffer>(
@@ -216,7 +217,10 @@ pub fn run_device_app<T: 'static + DeviceFramebuffer>(
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 window_id,
-            } if window_id == window.id() => *control_flow = ControlFlow::Exit,
+            } if window_id == window.id() => {
+                *control_flow = ControlFlow::Exit;
+                app.shutdown();
+            },
             Event::RedrawRequested(_) => {
                 if resized {
                     swap_chain = device.create_swap_chain(&surface, &sc_descriptor);
@@ -521,7 +525,10 @@ pub fn run_host_app<T: 'static + HostFramebuffer>(
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 window_id,
-            } if window_id == window.id() => *control_flow = ControlFlow::Exit,
+            } if window_id == window.id() => {
+                *control_flow = ControlFlow::Exit;
+                app.shutdown();
+            }
             Event::RedrawRequested(_) => {
                 let pixel_count = (width * height * 4) as usize;
 

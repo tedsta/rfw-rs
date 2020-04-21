@@ -43,11 +43,27 @@ impl BVHNode {
         }
     }
 
-    pub fn get_left_first(&self) -> i32 {
+    pub fn get_left_first(&self) -> Option<u32> {
+        if self.bounds.left_first >= 0 {
+            Some(self.bounds.left_first as u32)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_left_first_unchecked(&self) -> i32 {
         self.bounds.left_first
     }
 
-    pub fn get_count(&self) -> i32 {
+    pub fn get_count(&self) -> Option<u32> {
+        if self.bounds.count >= 0 {
+            Some(self.bounds.count as u32)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_count_unchecked(&self) -> i32 {
         self.bounds.count
     }
 

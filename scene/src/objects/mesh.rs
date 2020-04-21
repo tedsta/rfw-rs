@@ -7,16 +7,7 @@ use bvh::{Bounds, Ray, RayPacket4, AABB, BVH, MBVH};
 use serde::{Deserialize, Serialize};
 
 pub trait ToMesh {
-    fn into_rt_mesh(self) -> RTMesh;
-    fn into_mesh(self) -> RastMesh;
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RTMesh {
-    triangles: Vec<RTTriangle>,
-    materials: Vec<u32>,
-    bvh: BVH,
-    mbvh: MBVH,
+    fn into_mesh(self) -> Mesh;
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -56,20 +47,23 @@ impl VertexData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RastMesh {
+pub struct Mesh {
+    pub triangles: Vec<RTTriangle>,
     pub vertices: Vec<VertexData>,
     pub materials: Vec<u32>,
     pub meshes: Vec<VertexMesh>,
     pub bounds: AABB,
+    pub bvh: BVH,
+    pub mbvh: MBVH,
 }
 
-impl RastMesh {
+impl Mesh {
     pub fn new(
         vertices: &[Vec3],
         normals: &[Vec3],
         uvs: &[Vec2],
         material_ids: &[u32],
-    ) -> RastMesh {
+    ) -> Mesh {
         assert_eq!(vertices.len(), normals.len());
         assert_eq!(vertices.len(), uvs.len());
         assert_eq!(uvs.len(), material_ids.len() * 3);
@@ -108,66 +102,18 @@ impl RastMesh {
 
             if last_id != material_ids[i] {
                 bounds = AABB::new();
-                meshes.push(VertexMesh { first: start * 3, last: (start + range) * 3, mat_id: last_id, bounds: v_bounds.clone() });
+                meshes.push(VertexMesh {
+                    first: start * 3,
+                    last: (start + range) * 3,
+                    mat_id: last_id,
+                    bounds: v_bounds.clone(),
+                });
 
                 last_id = material_ids[i];
                 start = i as u32;
                 range = 1;
             }
         }
-
-        RastMesh {
-            vertices: vertex_data,
-            materials: Vec::from(material_ids),
-            meshes,
-            bounds,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.vertices.len()
-    }
-
-    pub fn empty() -> RastMesh {
-        RastMesh {
-            vertices: Vec::new(),
-            materials: Vec::new(),
-            meshes: Vec::new(),
-            bounds: AABB::new(),
-        }
-    }
-
-    pub fn buffer_size(&self) -> usize {
-        self.vertices.len() * std::mem::size_of::<VertexData>()
-    }
-
-    pub fn as_slice(&self) -> &[VertexData] {
-        self.vertices.as_slice()
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.buffer_size())
-        }
-    }
-
-}
-
-impl RTMesh {
-    pub fn empty() -> RTMesh {
-        RTMesh {
-            triangles: Vec::new(),
-            materials: Vec::new(),
-            bvh: BVH::empty(),
-            mbvh: MBVH::empty(),
-        }
-    }
-
-    pub fn new(vertices: &[Vec3], normals: &[Vec3], uvs: &[Vec2], material_ids: &[u32]) -> RTMesh {
-        assert_eq!(vertices.len(), normals.len());
-        assert_eq!(vertices.len(), uvs.len());
-        assert_eq!(uvs.len(), material_ids.len() * 3);
-        assert_eq!(vertices.len() % 3, 0);
 
         let mut triangles = vec![RTTriangle::zero(); vertices.len() / 3];
         triangles.iter_mut().enumerate().for_each(|(i, triangle)| {
@@ -212,17 +158,19 @@ impl RTMesh {
         let bvh = BVH::construct(aabbs.as_slice());
         let mbvh = MBVH::construct(&bvh);
 
-        RTMesh {
+        Mesh {
             triangles,
+            vertices: vertex_data,
+            materials: Vec::from(material_ids),
+            meshes,
+            bounds,
             bvh,
             mbvh,
-            materials: Vec::from(material_ids),
         }
     }
 
     pub fn scale(mut self, scaling: f32) -> Self {
-        let scaling = Mat4::from_scale(Vec3::new(scaling, scaling, scaling));
-
+        let scaling = Mat4::from_scale(Vec3::splat(scaling));
         self.triangles.par_iter_mut().for_each(|t| {
             let vertex0 = scaling * Vec4::new(t.vertex0[0], t.vertex0[1], t.vertex0[2], 1.0);
             let vertex1 = scaling * Vec4::new(t.vertex1[0], t.vertex1[1], t.vertex1[2], 1.0);
@@ -233,6 +181,10 @@ impl RTMesh {
             t.vertex2 = vertex2.truncate().into();
         });
 
+        self.vertices.par_iter_mut().for_each(|v| {
+            v.vertex = (scaling * Vec4::from(v.vertex)).into();
+        });
+
         let aabbs: Vec<AABB> = self.triangles.iter().map(|t| t.bounds()).collect();
 
         self.bvh = BVH::construct(aabbs.as_slice());
@@ -240,9 +192,39 @@ impl RTMesh {
 
         self
     }
+
+    pub fn len(&self) -> usize {
+        self.vertices.len()
+    }
+
+    pub fn empty() -> Mesh {
+        Mesh {
+            triangles: Vec::new(),
+            vertices: Vec::new(),
+            materials: Vec::new(),
+            meshes: Vec::new(),
+            bounds: AABB::new(),
+            bvh: BVH::empty(),
+            mbvh: MBVH::empty(),
+        }
+    }
+
+    pub fn buffer_size(&self) -> usize {
+        self.vertices.len() * std::mem::size_of::<VertexData>()
+    }
+
+    pub fn as_slice(&self) -> &[VertexData] {
+        self.vertices.as_slice()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, self.buffer_size())
+        }
+    }
 }
 
-impl Intersect for RTMesh {
+impl Intersect for Mesh {
     fn occludes(&self, ray: Ray, t_min: f32, t_max: f32) -> bool {
         let (origin, direction) = ray.into();
 
@@ -398,19 +380,13 @@ impl Intersect for RTMesh {
     }
 }
 
-impl Bounds for RTMesh {
-    fn bounds(&self) -> AABB {
-        self.bvh.nodes[0].bounds.clone()
-    }
-}
-
-impl Bounds for RastMesh {
+impl Bounds for Mesh {
     fn bounds(&self) -> AABB {
         self.bounds.clone()
     }
 }
 
-impl<'a> SerializableObject<'a, RTMesh> for RTMesh {
+impl<'a> SerializableObject<'a, Mesh> for Mesh {
     fn serialize<S: AsRef<std::path::Path>>(
         &self,
         path: S,
@@ -424,29 +400,7 @@ impl<'a> SerializableObject<'a, RTMesh> for RTMesh {
 
     fn deserialize<S: AsRef<std::path::Path>>(
         path: S,
-    ) -> Result<RTMesh, Box<dyn std::error::Error>> {
-        let file = std::fs::File::open(path)?;
-        let reader = std::io::BufReader::new(file);
-        let object: Self = bincode::deserialize_from(reader)?;
-        Ok(object)
-    }
-}
-
-impl<'a> SerializableObject<'a, RastMesh> for RastMesh {
-    fn serialize<S: AsRef<std::path::Path>>(
-        &self,
-        path: S,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        use std::io::Write;
-        let encoded: Vec<u8> = bincode::serialize(self)?;
-        let mut file = std::fs::File::create(path)?;
-        file.write_all(encoded.as_ref())?;
-        Ok(())
-    }
-
-    fn deserialize<S: AsRef<std::path::Path>>(
-        path: S,
-    ) -> Result<RastMesh, Box<dyn std::error::Error>> {
+    ) -> Result<Mesh, Box<dyn std::error::Error>> {
         let file = std::fs::File::open(path)?;
         let reader = std::io::BufReader::new(file);
         let object: Self = bincode::deserialize_from(reader)?;

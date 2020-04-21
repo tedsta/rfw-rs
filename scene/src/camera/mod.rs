@@ -1,19 +1,21 @@
 use bvh::{Ray, RayPacket4};
 use glam::*;
 use std::f32::consts::PI;
+use serde::{Serialize, Deserialize};
 
 use crate::constants::DEFAULT_T_MAX;
 
 pub mod frustrum;
 
 pub use frustrum::*;
+use crate::SerializableObject;
 
 pub fn vec4_sqrt(vec: Vec4) -> Vec4 {
     use std::arch::x86_64::_mm_sqrt_ps;
     unsafe { _mm_sqrt_ps(vec.into()).into() }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Camera {
     pub pos: [f32; 3],
     up: [f32; 3],
@@ -293,5 +295,29 @@ impl Camera {
 
     pub fn calculate_frustrum(&self) -> frustrum::FrustrumG {
         frustrum::FrustrumG::from_matrix(self.get_rh_matrix())
+    }
+}
+
+impl<'a> SerializableObject<'a, Camera> for Camera {
+    fn serialize<S: AsRef<std::path::Path>>(
+        &self,
+        path: S,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = path.as_ref().with_extension(".cam");
+        use std::io::Write;
+        let encoded: Vec<u8> = bincode::serialize(self)?;
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(encoded.as_ref())?;
+        Ok(())
+    }
+
+    fn deserialize<S: AsRef<std::path::Path>>(
+        path: S,
+    ) -> Result<Camera, Box<dyn std::error::Error>> {
+        let path = path.as_ref().with_extension(".cam");
+        let file = std::fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        let object: Self = bincode::deserialize_from(reader)?;
+        Ok(object)
     }
 }

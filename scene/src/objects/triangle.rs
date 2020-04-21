@@ -112,10 +112,9 @@ impl RTTriangle {
             ..(*self)
         }
     }
-}
 
-impl Intersect for RTTriangle {
-    fn occludes(&self, ray: Ray, t_min: f32, t_max: f32) -> bool {
+    #[inline(always)]
+    pub fn occludes(&self, ray: Ray, t_min: f32, t_max: f32) -> bool {
         let origin = glam::Vec3::from(ray.origin);
         let direction = glam::Vec3::from(ray.direction);
 
@@ -149,7 +148,8 @@ impl Intersect for RTTriangle {
         t > t_min && t < t_max
     }
 
-    fn intersect(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
+    #[inline(always)]
+    pub fn intersect(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let origin = glam::Vec3::from(ray.origin);
         let direction = glam::Vec3::from(ray.direction);
 
@@ -208,7 +208,8 @@ impl Intersect for RTTriangle {
         })
     }
 
-    fn intersect_t(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<f32> {
+    #[inline(always)]
+    pub fn intersect_t(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<f32> {
         let (origin, direction) = ray.into();
 
         let vertex0 = glam::Vec3::from(self.vertex0);
@@ -245,14 +246,16 @@ impl Intersect for RTTriangle {
         Some(t)
     }
 
-    fn depth_test(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<(f32, u32)> {
+    #[inline(always)]
+    pub fn depth_test(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<(f32, u32)> {
         if let Some(t) = self.intersect_t(ray, t_min, t_max) {
             return Some((t, 1));
         }
         None
     }
 
-    fn intersect4(&self, packet: &mut RayPacket4, t_min: &[f32; 4]) -> Option<[PrimID; 4]> {
+    #[inline(always)]
+    pub fn intersect4(&self, packet: &mut RayPacket4, t_min: &[f32; 4]) -> Option<[PrimID; 4]> {
         let zero = glam::Vec4::zero();
         let one = glam::Vec4::one();
 
@@ -333,7 +336,8 @@ impl Intersect for RTTriangle {
         Some([x, y, z, w])
     }
 
-    fn get_hit_record(&self, ray: Ray, t: f32, _: u32) -> HitRecord {
+    #[inline(always)]
+    pub fn get_hit_record(&self, ray: Ray, t: f32, _: u32) -> HitRecord {
         let (origin, direction) = ray.into();
         let vertex0 = glam::Vec3::from(self.vertex0);
         let vertex1 = glam::Vec3::from(self.vertex1);

@@ -1,18 +1,17 @@
 use glam::*;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use serde::{Serialize, Deserialize};
 
-use crate::{AABB, RayPacket4};
+use crate::{RayPacket4, AABB};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[repr(C)]
 pub struct BVHNode {
     pub bounds: AABB,
 }
-
 
 impl Display for BVHNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -359,8 +358,8 @@ impl BVHNode {
         t_max: f32,
         depth_test: I,
     ) -> (f32, u32)
-        where
-            I: Fn(usize, f32, f32) -> Option<(f32, u32)>,
+    where
+        I: Fn(usize, f32, f32) -> Option<(f32, u32)>,
     {
         let mut t = t_max;
         let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / dir;
@@ -374,6 +373,13 @@ impl BVHNode {
         let mut stack_ptr: i32 = 0;
 
         while stack_ptr >= 0 {
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(hit_stack[stack_ptr as usize] as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             depth = depth + 1;
             let node = &tree[hit_stack[stack_ptr as usize] as usize];
             stack_ptr = stack_ptr - 1;
@@ -418,9 +424,9 @@ impl BVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> Option<R>
-        where
-            I: FnMut(usize, f32, f32) -> Option<(f32, R)>,
-            R: Copy,
+    where
+        I: FnMut(usize, f32, f32) -> Option<(f32, R)>,
+        R: Copy,
     {
         let mut hit_stack = [0; 32];
         let mut stack_ptr: i32 = 0;
@@ -430,6 +436,13 @@ impl BVHNode {
         let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / dir;
         hit_stack[stack_ptr as usize] = 0;
         while stack_ptr >= 0 {
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(hit_stack[stack_ptr as usize] as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             let node = &tree[hit_stack[stack_ptr as usize] as usize];
             stack_ptr = stack_ptr - 1;
 
@@ -472,8 +485,8 @@ impl BVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> Option<f32>
-        where
-            I: FnMut(usize, f32, f32) -> Option<f32>,
+    where
+        I: FnMut(usize, f32, f32) -> Option<f32>,
     {
         let mut hit_stack = [0; 32];
         let mut stack_ptr: i32 = 0;
@@ -482,6 +495,13 @@ impl BVHNode {
         let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / dir;
         hit_stack[stack_ptr as usize] = 0;
         while stack_ptr >= 0 {
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(hit_stack[stack_ptr as usize] as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             let node = &tree[hit_stack[stack_ptr as usize] as usize];
             stack_ptr = stack_ptr - 1;
 
@@ -527,8 +547,8 @@ impl BVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> bool
-        where
-            I: FnMut(usize, f32, f32) -> bool,
+    where
+        I: FnMut(usize, f32, f32) -> bool,
     {
         let mut hit_stack = [0; 32];
         let mut stack_ptr: i32 = 0;
@@ -536,6 +556,13 @@ impl BVHNode {
         let dir_inverse = Vec3::new(1.0, 1.0, 1.0) / dir;
         hit_stack[stack_ptr as usize] = 0;
         while stack_ptr >= 0 {
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(hit_stack[stack_ptr as usize] as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             let node = &tree[hit_stack[stack_ptr as usize] as usize];
             stack_ptr = stack_ptr - 1;
 
@@ -640,8 +667,7 @@ impl BVHNode {
         prim_indices: &[u32],
         packet: &mut RayPacket4,
         mut intersection_test: I,
-    )
-    {
+    ) {
         let mut hit_stack = [0; 32];
         let mut stack_ptr: i32 = 0;
 
@@ -651,6 +677,13 @@ impl BVHNode {
         let inv_dir_z = one / Vec4::from(packet.direction_z);
 
         while stack_ptr >= 0 {
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(hit_stack[stack_ptr as usize] as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             let node = &tree[hit_stack[stack_ptr as usize] as usize];
             stack_ptr = stack_ptr - 1;
 
@@ -661,9 +694,12 @@ impl BVHNode {
                     intersection_test(prim_id, packet);
                 }
             } else {
-                let hit_left =
-                    tree[node.bounds.left_first as usize].bounds.intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z);
-                let hit_right = tree[(node.bounds.left_first + 1) as usize].bounds.intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z);
+                let hit_left = tree[node.bounds.left_first as usize]
+                    .bounds
+                    .intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z);
+                let hit_right = tree[(node.bounds.left_first + 1) as usize]
+                    .bounds
+                    .intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z);
 
                 stack_ptr = Self::sort_nodes4(
                     hit_left,

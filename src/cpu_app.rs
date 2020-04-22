@@ -1,11 +1,11 @@
 use crate::utils::*;
+use bvh::Ray;
 use fb_template::{
     HostFramebuffer, KeyCode, KeyHandler, MouseButtonCode, MouseButtonHandler, Request,
 };
 use glam::*;
 use rayon::prelude::*;
-use bvh::Ray;
-use scene::{Quad, constants, Scene, BVHMode, ToMesh, Camera, TriangleScene, SerializableObject};
+use scene::{constants, BVHMode, Camera, Quad, Scene, SerializableObject, ToMesh, TriangleScene};
 use std::error::Error;
 
 #[derive(Debug, Copy, Clone)]
@@ -36,14 +36,23 @@ impl CPUApp {
         let sphere = scene.load_mesh("models/sphere.obj").unwrap();
         (-2..3).for_each(|x| {
             (3..8).for_each(|z| {
-                let matrix = Mat4::from_translation(Vec3::new(x as f32 * 2.0, 0.0, z as f32 * 2.0)) * Mat4::from_scale(Vec3::splat(0.01));
+                let matrix = Mat4::from_translation(Vec3::new(x as f32 * 2.0, 0.0, z as f32 * 2.0))
+                    * Mat4::from_scale(Vec3::splat(0.01));
                 scene.add_instance(sphere, matrix).unwrap();
             })
         });
 
-        let quad_mat_id = scene.materials.add(Vec3::new(0.2, 0.2, 1.0), 1.0, Vec3::one(), 1.0) as u32;
-        let quad = Quad::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -2.0, 10.0), 10., 10.0, quad_mat_id)
-            .into_mesh();
+        let quad_mat_id = scene
+            .materials
+            .add(Vec3::new(0.2, 0.2, 1.0), 1.0, Vec3::one(), 1.0) as u32;
+        let quad = Quad::new(
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, -2.0, 10.0),
+            10.,
+            10.0,
+            quad_mat_id,
+        )
+        .into_mesh();
         let quad = scene.add_object(quad);
         let _ = scene.add_instance(quad, Mat4::identity()).unwrap();
         scene.build_bvh();
@@ -52,7 +61,7 @@ impl CPUApp {
         let (width, height) = (1, 1);
         let mut camera = match Camera::deserialize("cpu-camera") {
             Ok(c) => c,
-            Err(_) => Camera::new(width, height)
+            Err(_) => Camera::new(width, height),
         };
 
         camera.resize(width, height);
@@ -106,7 +115,11 @@ impl CPUApp {
                 for x in 0..width {
                     let ray = view.generate_ray(x as u32, y as u32);
                     pixels[x] = {
-                        let (_, depth) = intersector.depth_test(ray, constants::DEFAULT_T_MIN, constants::DEFAULT_T_MAX);
+                        let (_, depth) = intersector.depth_test(
+                            ray,
+                            constants::DEFAULT_T_MIN,
+                            constants::DEFAULT_T_MAX,
+                        );
                         if depth == 0 {
                             Vec4::from([0.0; 4])
                         } else {
@@ -165,40 +178,77 @@ impl CPUApp {
 
                     let mut packet = view.generate_ray4(&xs, &ys, width as u32);
 
-                    // let packet: &mut RayPacket4 = &mut packet[p as usize];
-                    let (instance_ids, prim_ids) =
-                        intersector.intersect4(&mut packet, [constants::DEFAULT_T_MIN; 4]);
+                    const USE_PACKETS: bool = false;
 
-                    for i in 0..4 {
-                        let local_pixel_id = i + x as usize;
-                        if local_pixel_id >= length {
-                            continue;
+                    if USE_PACKETS {
+                        // let packet: &mut RayPacket4 = &mut packet[p as usize];
+                        let (instance_ids, prim_ids) =
+                            intersector.intersect4(&mut packet, [constants::DEFAULT_T_MIN; 4]);
+
+                        for i in 0..4 {
+                            let local_pixel_id = i + x as usize;
+                            if local_pixel_id >= length {
+                                continue;
+                            }
+
+                            let origin: [f32; 3] =
+                                [packet.origin_x[i], packet.origin_y[i], packet.origin_z[i]];
+                            let direction: [f32; 3] = [
+                                packet.direction_x[i],
+                                packet.direction_y[i],
+                                packet.direction_z[i],
+                            ];
+                            let prim_id = prim_ids[i];
+                            let instance_id = instance_ids[i];
+
+                            output[local_pixel_id] = if prim_id >= 0 || instance_id >= 0 {
+                                let hit = intersector.get_hit_record(
+                                    Ray { origin, direction },
+                                    packet.t[i],
+                                    instance_id,
+                                    prim_id,
+                                );
+                                let material =
+                                    unsafe { materials.get_unchecked(hit.mat_id as usize) };
+
+                                let color: Vec3 = Vec4::from(material.color).truncate()
+                                    * -Vec3::from(direction).dot(hit.normal.into());
+                                color.extend(1.0)
+                            } else {
+                                Vec4::zero()
+                            }
                         }
+                    } else {
+                        for i in 0..4 {
+                            let local_pixel_id = i + x as usize;
+                            if local_pixel_id >= length {
+                                continue;
+                            }
 
-                        let origin: [f32; 3] =
-                            [packet.origin_x[i], packet.origin_y[i], packet.origin_z[i]];
-                        let direction: [f32; 3] = [
-                            packet.direction_x[i],
-                            packet.direction_y[i],
-                            packet.direction_z[i],
-                        ];
-                        let prim_id = prim_ids[i];
-                        let instance_id = instance_ids[i];
-
-                        output[local_pixel_id] = if prim_id >= 0 || instance_id >= 0 {
-                            let hit = intersector.get_hit_record(
-                                Ray { origin, direction },
-                                packet.t[i],
-                                instance_id,
-                                prim_id,
+                            let origin = Vec3::new(
+                                packet.origin_x[i],
+                                packet.origin_y[i],
+                                packet.origin_z[i],
                             );
-                            let material = unsafe { materials.get_unchecked(hit.mat_id as usize) };
-
-                            let color: Vec3 =
-                                Vec4::from(material.color).truncate() * -Vec3::from(direction).dot(hit.normal.into());
-                            color.extend(1.0)
-                        } else {
-                            Vec4::zero()
+                            let direction = Vec3::new(
+                                packet.direction_x[i],
+                                packet.direction_y[i],
+                                packet.direction_z[i],
+                            );
+                            let ray = (origin, direction).into();
+                            if let Some(hit) = intersector.intersect(
+                                ray,
+                                constants::DEFAULT_T_MIN,
+                                constants::DEFAULT_T_MAX,
+                            ) {
+                                let material =
+                                    unsafe { materials.get_unchecked(hit.mat_id as usize) };
+                                output[local_pixel_id] = (Vec4::from(material.color).truncate()
+                                    * -Vec3::from(direction).dot(hit.normal.into()))
+                                .extend(1.0);
+                            } else {
+                                output[local_pixel_id] = Vec4::zero();
+                            }
                         }
                     }
                 }

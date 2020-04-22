@@ -4,7 +4,44 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-    
+        {
+            "name": "(Windows) CPU Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/rust-raytracer.exe",
+            "args": [
+                "--renderer=cpu"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                }
+            ],
+            "externalConsole": false,
+            "preLaunchTask": "cargo build"
+        },
+        {
+            "name": "(Windows) CPU Release Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/release/rust-raytracer.exe",
+            "args": [
+                "--renderer=cpu"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                }
+            ],
+            "externalConsole": false,
+            "preLaunchTask": "cargo build release"
+        },
         {
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
@@ -38,6 +75,46 @@
             ],
             "externalConsole": false,
             "preLaunchTask": "cargo build release"
+        },
+        {
+            "name": "CPU Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/rust-raytracer",
+            "args": [
+                "--renderer=cpu"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                }
+            ],
+            "externalConsole": false,
+            "preLaunchTask": "cargo build",
+            "MIMode": "lldb"
+        },
+        {
+            "name": "CPU Release Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/release/rust-raytracer",
+            "args": [
+                "--renderer=cpu"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                }
+            ],
+            "externalConsole": false,
+            "preLaunchTask": "cargo build release",
+            "MIMode": "lldb"
         },
         {
             "name": "Launch",

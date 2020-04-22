@@ -1,6 +1,6 @@
 use crate::objects::*;
 use crate::scene::*;
-use crate::{utils::*, Camera, FrustrumG, FrustrumResult, MaterialList};
+use crate::{loaders, utils::*, Camera, FrustrumG, FrustrumResult, MaterialList};
 use bvh::Ray;
 
 use bvh::{Bounds, RayPacket4, ShadowPacket4, AABB, BVH, MBVH};
@@ -11,6 +11,7 @@ use std::ffi::OsString;
 use std::{
     collections::HashSet, error::Error, fs::File, io::prelude::*, io::BufReader, path::Path,
 };
+use loaders::obj;
 
 /// Scene optimized for triangles
 /// Does not support objects other than Meshes, but does not require virtual calls because of this.
@@ -702,7 +703,7 @@ impl TriangleScene {
         let materials = &mut self.materials;
 
         if extension == "obj" {
-            let obj = Obj::new(path, materials);
+            let obj = obj::Obj::new(path, materials);
             if obj.is_err() {
                 println!("Obj error: {}", obj.err().unwrap());
                 return None;

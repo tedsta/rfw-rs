@@ -5,6 +5,7 @@ pub mod objects;
 pub mod constants;
 pub mod camera;
 pub mod lights;
+pub mod loaders;
 
 mod utils;
 
@@ -14,6 +15,7 @@ pub use scene::*;
 pub use triangle_scene::*;
 pub use objects::*;
 pub use lights::*;
+pub use loaders::*;
 
 #[cfg(test)]
 mod tests {

@@ -58,12 +58,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn new(
-        vertices: &[Vec3],
-        normals: &[Vec3],
-        uvs: &[Vec2],
-        material_ids: &[u32],
-    ) -> Mesh {
+    pub fn new(vertices: &[Vec3], normals: &[Vec3], uvs: &[Vec2], material_ids: &[u32]) -> Mesh {
         assert_eq!(vertices.len(), normals.len());
         assert_eq!(vertices.len(), uvs.len());
         assert_eq!(uvs.len(), material_ids.len() * 3);
@@ -169,9 +164,11 @@ impl Mesh {
         }
     }
 
-    pub fn scale(mut self, scaling: f32) -> Self {
+    pub fn scale(&mut self, scaling: f32) -> Self {
+        let mut new_self = self.clone();
+
         let scaling = Mat4::from_scale(Vec3::splat(scaling));
-        self.triangles.par_iter_mut().for_each(|t| {
+        new_self.triangles.par_iter_mut().for_each(|t| {
             let vertex0 = scaling * Vec4::new(t.vertex0[0], t.vertex0[1], t.vertex0[2], 1.0);
             let vertex1 = scaling * Vec4::new(t.vertex1[0], t.vertex1[1], t.vertex1[2], 1.0);
             let vertex2 = scaling * Vec4::new(t.vertex2[0], t.vertex2[1], t.vertex2[2], 1.0);
@@ -181,16 +178,16 @@ impl Mesh {
             t.vertex2 = vertex2.truncate().into();
         });
 
-        self.vertices.par_iter_mut().for_each(|v| {
-            v.vertex = (scaling * Vec4::from(v.vertex)).into();
+        new_self.vertices.iter_mut().for_each(|v| {
+            v.vertex = (scaling * Vec4::new(v.vertex[0], v.vertex[1], v.vertex[2], 1.0)).into();
         });
 
-        let aabbs: Vec<AABB> = self.triangles.iter().map(|t| t.bounds()).collect();
+        let aabbs: Vec<AABB> = new_self.triangles.iter().map(|t| t.bounds()).collect();
 
-        self.bvh = BVH::construct(aabbs.as_slice());
-        self.mbvh = MBVH::construct(&self.bvh);
+        new_self.bvh = BVH::construct(aabbs.as_slice());
+        new_self.mbvh = MBVH::construct(&new_self.bvh);
 
-        self
+        new_self
     }
 
     pub fn len(&self) -> usize {
@@ -398,9 +395,7 @@ impl<'a> SerializableObject<'a, Mesh> for Mesh {
         Ok(())
     }
 
-    fn deserialize<S: AsRef<std::path::Path>>(
-        path: S,
-    ) -> Result<Mesh, Box<dyn std::error::Error>> {
+    fn deserialize<S: AsRef<std::path::Path>>(path: S) -> Result<Mesh, Box<dyn std::error::Error>> {
         let file = std::fs::File::open(path)?;
         let reader = std::io::BufReader::new(file);
         let object: Self = bincode::deserialize_from(reader)?;

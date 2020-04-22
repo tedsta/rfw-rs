@@ -1,5 +1,5 @@
 use glam::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
 use crate::RayPacket4;
@@ -63,17 +63,16 @@ impl AABB {
     }
 
     pub fn intersect(&self, origin: Vec3, dir_inverse: Vec3, t: f32) -> Option<(f32, f32)> {
-        let min = Vec3::from(self.min);
-        let max = Vec3::from(self.max);
+        let (min, max) = self.points();
 
         let t1 = (min - origin) * dir_inverse;
         let t2 = (max - origin) * dir_inverse;
 
-        let t_min = t1.min(t2);
-        let t_max = t1.max(t2);
+        let t_min: Vec3 = t1.min(t2);
+        let t_max: Vec3 = t1.max(t2);
 
-        let t_min = t_min.x().max(t_min.y().max(t_min.z()));
-        let t_max = t_max.x().min(t_max.y().min(t_max.z()));
+        let t_min = t_min.max_element();
+        let t_max = t_max.min_element();
 
         if t_max > t_min && t_min < t {
             return Some((t_min, t_max));
@@ -89,17 +88,15 @@ impl AABB {
         inv_dir_y: Vec4,
         inv_dir_z: Vec4,
     ) -> Option<[f32; 4]> {
-        let org_x: Vec4 = packet.origin_x.into();
-        let org_y: Vec4 = packet.origin_y.into();
-        let org_z: Vec4 = packet.origin_z.into();
+        let (org_x, org_y, org_z) = packet.origin_xyz();
 
-        let t1_x = (Vec4::from([self.min[0]; 4]) - org_x) * inv_dir_x;
-        let t1_y = (Vec4::from([self.min[1]; 4]) - org_y) * inv_dir_y;
-        let t1_z = (Vec4::from([self.min[2]; 4]) - org_z) * inv_dir_z;
+        let t1_x = (Vec4::splat(self.min[0]) - org_x) * inv_dir_x;
+        let t1_y = (Vec4::splat(self.min[1]) - org_y) * inv_dir_y;
+        let t1_z = (Vec4::splat(self.min[2]) - org_z) * inv_dir_z;
 
-        let t2_x = (Vec4::from([self.max[0]; 4]) - org_x) * inv_dir_x;
-        let t2_y = (Vec4::from([self.max[1]; 4]) - org_y) * inv_dir_y;
-        let t2_z = (Vec4::from([self.max[2]; 4]) - org_z) * inv_dir_z;
+        let t2_x = (Vec4::splat(self.max[0]) - org_x) * inv_dir_x;
+        let t2_y = (Vec4::splat(self.max[1]) - org_y) * inv_dir_y;
+        let t2_z = (Vec4::splat(self.max[2]) - org_z) * inv_dir_z;
 
         let t_min_x = t1_x.min(t2_x);
         let t_min_y = t1_y.min(t2_y);
@@ -121,8 +118,7 @@ impl AABB {
     }
 
     pub fn grow(&mut self, pos: Vec3) {
-        let min = Vec3::from(self.min);
-        let max = Vec3::from(self.max);
+        let (min, max) = self.points();
         let min = min.min(pos);
         let max = max.max(pos);
 
@@ -142,8 +138,7 @@ impl AABB {
     pub fn offset_by(&mut self, delta: f32) {
         let delta = Vec3::from([delta; 3]);
 
-        let min = Vec3::from(self.min);
-        let max = Vec3::from(self.max);
+        let (min, max) = self.points();
         let min = min - delta;
         let max = max + delta;
 
@@ -154,41 +149,31 @@ impl AABB {
     }
 
     pub fn union_of(&self, bb: &AABB) -> AABB {
-        let min = Vec3::from(self.min).min(bb.min.into());
-        let max = Vec3::from(self.max).max(bb.max.into());
+        let (min, max) = self.points();
+        let (b_min, b_max) = bb.points();
 
-        let mut new_min = [0.0; 3];
-        let mut new_max = [0.0; 3];
-
-        for i in 0..3 {
-            new_min[i] = min[i];
-            new_max[i] = max[i];
-        }
+        let new_min = Vec3::from(min).min(Vec3::from(b_min));
+        let new_max = Vec3::from(max).max(Vec3::from(b_max));
 
         AABB {
-            min: new_min,
+            min: new_min.into(),
             left_first: -1,
-            max: new_max,
+            max: new_max.into(),
             count: -1,
         }
     }
 
     pub fn intersection(&self, bb: &AABB) -> AABB {
-        let min = Vec3::from(self.min).max(Vec3::from(bb.min));
-        let max = Vec3::from(self.max).min(Vec3::from(bb.max));
+        let (min, max) = self.points();
+        let (b_min, b_max) = bb.points();
 
-        let mut new_min = [0.0; 3];
-        let mut new_max = [0.0; 3];
-
-        for i in 0..3 {
-            new_min[i] = min[i].max(bb.min[i]);
-            new_max[i] = max[i].min(bb.max[i]);
-        }
+        let new_min = Vec3::from(min).max(Vec3::from(b_min));
+        let new_max = Vec3::from(max).min(Vec3::from(b_max));
 
         AABB {
-            min: new_min,
+            min: new_min.into(),
             left_first: -1,
-            max: new_max,
+            max: new_max.into(),
             count: -1,
         }
     }
@@ -273,6 +258,13 @@ impl AABB {
         transformed.offset_by(1e-4);
 
         transformed
+    }
+
+    pub fn points(&self) -> (Vec3, Vec3) {
+        (
+            Vec3::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min.as_ptr()) }),
+            Vec3::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max.as_ptr()) }),
+        )
     }
 
     pub fn transform(&mut self, transform: Mat4) {

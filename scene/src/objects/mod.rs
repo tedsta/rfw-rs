@@ -2,23 +2,21 @@ use glam::*;
 
 pub mod instance;
 pub mod mesh;
-pub mod obj;
-pub mod sphere;
-pub mod triangle;
 pub mod plane;
 pub mod quad;
+pub mod sphere;
+pub mod triangle;
 
 use crate::scene::PrimID;
 use bvh::{Bounds, Ray, RayPacket4};
 pub use instance::*;
 pub use mesh::*;
-pub use obj::*;
-pub use sphere::*;
-pub use triangle::*;
 pub use plane::*;
 pub use quad::*;
+pub use sphere::*;
+pub use triangle::*;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug)]
 pub struct HitRecord {
@@ -40,6 +38,9 @@ pub trait Intersect: Bounds + Send + Sync {
 }
 
 pub trait SerializableObject<'a, T: Serialize + Deserialize<'a>> {
-    fn serialize<S: AsRef<std::path::Path>>(&self, path: S) -> Result<(), Box<dyn std::error::Error>>;
+    fn serialize<S: AsRef<std::path::Path>>(
+        &self,
+        path: S,
+    ) -> Result<(), Box<dyn std::error::Error>>;
     fn deserialize<S: AsRef<std::path::Path>>(path: S) -> Result<T, Box<dyn std::error::Error>>;
 }

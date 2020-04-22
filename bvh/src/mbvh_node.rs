@@ -46,6 +46,22 @@ impl MBVHNode {
         }
     }
 
+    pub fn min_points(&self) -> (Vec4, Vec4, Vec4) {
+        (
+            Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min_x.as_ptr()) }),
+            Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min_y.as_ptr()) }),
+            Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min_z.as_ptr()) }),
+        )
+    }
+
+    pub fn max_points(&self) -> (Vec4, Vec4, Vec4) {
+        (
+            Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max_x.as_ptr()) }),
+            Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max_y.as_ptr()) }),
+            Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max_z.as_ptr()) }),
+        )
+    }
+
     pub fn set_bounds(&mut self, node_id: usize, min: &[f32; 3], max: &[f32; 3]) {
         assert!(node_id < 4);
         self.min_x[node_id] = min[0];
@@ -63,41 +79,35 @@ impl MBVHNode {
 
     #[inline(always)]
     fn intersect(&self, origin: Vec3, inv_direction: Vec3, t: f32) -> Option<MBVHHit> {
-        let origin_x: Vec4 = [origin.x(); 4].into();
-        let origin_y: Vec4 = [origin.y(); 4].into();
-        let origin_z: Vec4 = [origin.z(); 4].into();
+        let origin_x: Vec4 = Vec4::splat(origin.x());
+        let origin_y: Vec4 = Vec4::splat(origin.y());
+        let origin_z: Vec4 = Vec4::splat(origin.z());
 
-        let inv_dir_x: Vec4 = [inv_direction.x(); 4].into();
-        let inv_dir_y: Vec4 = [inv_direction.y(); 4].into();
-        let inv_dir_z: Vec4 = [inv_direction.z(); 4].into();
+        let inv_dir_x: Vec4 = Vec4::splat(inv_direction.x());
+        let inv_dir_y: Vec4 = Vec4::splat(inv_direction.y());
+        let inv_dir_z: Vec4 = Vec4::splat(inv_direction.z());
 
-        let min_x = Vec4::from(self.min_x);
-        let min_y = Vec4::from(self.min_y);
-        let min_z = Vec4::from(self.min_z);
+        let (min_x, min_y, min_z) = self.min_points();
+        let (max_x, max_y, max_z) = self.max_points();
 
-        let max_x = Vec4::from(self.max_x);
-        let max_y = Vec4::from(self.max_y);
-        let max_z = Vec4::from(self.max_z);
+        let tx0: Vec4 = (min_x - origin_x) * inv_dir_x;
+        let tx1: Vec4 = (max_x - origin_x) * inv_dir_x;
+        let ty0: Vec4 = (min_y - origin_y) * inv_dir_y;
+        let ty1: Vec4 = (max_y - origin_y) * inv_dir_y;
+        let tz0: Vec4 = (min_z - origin_z) * inv_dir_z;
+        let tz1: Vec4 = (max_z - origin_z) * inv_dir_z;
 
-        let t1 = (min_x - origin_x) * inv_dir_x;
-        let t2 = (max_x - origin_x) * inv_dir_x;
+        let tx_min = tx0.min(tx1);
+        let tx_max = tx0.max(tx1);
+        let ty_min = ty0.min(ty1);
+        let ty_max = ty0.max(ty1);
+        let tz_min = tz0.min(tz1);
+        let tz_max = tz0.max(tz1);
+        
+        let mut t_min = tx_min.max(ty_min.max(tz_min));
+        let t_max = tx_max.min(ty_max.min(tz_max));
 
-        let t_min = t1.min(t2);
-        let t_max = t1.max(t2);
-
-        let t1 = (min_y - origin_y) * inv_dir_y;
-        let t2 = (max_y - origin_y) * inv_dir_y;
-
-        let t_min = t_min.max(t1.min(t2));
-        let t_max = t_max.min(t1.max(t2));
-
-        let t1 = (min_z - origin_z) * inv_dir_z;
-        let t2 = (max_z - origin_z) * inv_dir_z;
-
-        let mut t_min = t_min.max(t1.min(t2));
-        let t_max = t_max.min(t1.max(t2));
-
-        let result = t_max.cmpge(t_min) & (t_min.cmplt([t; 4].into()));
+        let result = t_max.cmpge(t_min) & t_min.cmplt(Vec4::splat(t));
         let result = result.bitmask();
         if result == 0 {
             return None;
@@ -135,6 +145,64 @@ impl MBVHNode {
         }
 
         Some(MBVHHit { ids, result })
+
+
+        // let t1: Vec4 = (min_x - origin_x) * inv_dir_x;
+        // let t2: Vec4 = (max_x - origin_x) * inv_dir_x;
+
+        // let t_min: Vec4 = t1.min(t2);
+        // let t_max: Vec4 = t1.max(t2);
+
+        // let t1: Vec4 = (min_y - origin_y) * inv_dir_y;
+        // let t2: Vec4 = (max_y - origin_y) * inv_dir_y;
+
+        // let t_min: Vec4 = t_min.max(t1.min(t2));
+        // let t_max: Vec4 = t_max.min(t1.max(t2));
+
+        // let t1: Vec4 = (min_z - origin_z) * inv_dir_z;
+        // let t2: Vec4 = (max_z - origin_z) * inv_dir_z;
+
+        // let mut t_min: Vec4 = t_min.max(t1.min(t2));
+        // let t_max: Vec4 = t_max.min(t1.max(t2));
+
+        // let result = t_max.cmpge(t_min) & t_min.cmplt(Vec4::splat(t));
+        // let result = result.bitmask();
+        // if result == 0 {
+        //     return None;
+        // }
+
+        // let result = [
+        //     (result & 1) != 0,
+        //     (result & 2) != 0,
+        //     (result & 4) != 0,
+        //     (result & 8) != 0,
+        // ];
+
+        // let mut ids = [0, 1, 2, 3];
+
+        // let t_minf = t_min.as_mut();
+
+        // if t_minf[0] > t_minf[1] {
+        //     t_minf.swap(0, 1);
+        //     ids.swap(0, 1);
+        // }
+        // if t_minf[2] > t_minf[3] {
+        //     t_minf.swap(2, 3);
+        //     ids.swap(2, 3);
+        // }
+        // if t_minf[0] > t_minf[2] {
+        //     t_minf.swap(0, 2);
+        //     ids.swap(0, 2);
+        // }
+        // if t_minf[1] > t_minf[3] {
+        //     t_minf.swap(1, 3);
+        //     ids.swap(1, 3);
+        // }
+        // if t_minf[2] > t_minf[3] {
+        //     ids.swap(2, 3);
+        // }
+
+        // Some(MBVHHit { ids, result })
     }
 
     #[inline(always)]
@@ -145,21 +213,21 @@ impl MBVHNode {
         inv_dir_y: Vec4,
         inv_dir_z: Vec4,
     ) -> Option<MBVHHit> {
-        let min_x = Vec4::from(self.min_x);
-        let max_x = Vec4::from(self.max_x);
+        let min_x = Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min_x.as_ptr()) });
+        let max_x = Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max_x.as_ptr()) });
 
-        let min_y = Vec4::from(self.min_y);
-        let max_y = Vec4::from(self.max_y);
+        let min_y = Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min_y.as_ptr()) });
+        let max_y = Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max_y.as_ptr()) });
 
-        let min_z = Vec4::from(self.min_z);
-        let max_z = Vec4::from(self.max_z);
+        let min_z = Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.min_z.as_ptr()) });
+        let max_z = Vec4::from(unsafe { core::arch::x86_64::_mm_load_ps(self.max_z.as_ptr()) });
 
         let mut result = Vec4Mask::new(false, false, false, false);
-        let mut final_t_min = Vec4::from([1e26; 4]);
+        let mut final_t_min = Vec4::splat(1e26);
 
         for i in 0..4 {
-            let org_comp = Vec4::from([packet.origin_x[i]; 4]);
-            let dir_comp = Vec4::from([inv_dir_x[i]; 4]);
+            let org_comp = Vec4::splat(packet.origin_x[i]);
+            let dir_comp = Vec4::splat(inv_dir_x[i]);
 
             let t1 = (min_x - org_comp) * dir_comp;
             let t2 = (max_x - org_comp) * dir_comp;
@@ -167,8 +235,8 @@ impl MBVHNode {
             let t_min = t1.min(t2);
             let t_max = t1.max(t2);
 
-            let org_comp = Vec4::from([packet.origin_y[i]; 4]);
-            let dir_comp = Vec4::from([inv_dir_y[i]; 4]);
+            let org_comp = Vec4::splat(packet.origin_y[i]);
+            let dir_comp = Vec4::splat(inv_dir_y[i]);
 
             let t1 = (min_y - org_comp) * dir_comp;
             let t2 = (max_y - org_comp) * dir_comp;
@@ -176,17 +244,17 @@ impl MBVHNode {
             let t_min = t_min.max(t1.min(t2));
             let t_max = t_max.min(t1.max(t2));
 
-            let org_comp = Vec4::from([packet.origin_z[i]; 4]);
-            let dir_comp = Vec4::from([inv_dir_z[i]; 4]);
+            let org_comp = Vec4::splat(packet.origin_z[i]);
+            let dir_comp = Vec4::splat(inv_dir_z[i]);
 
             let t1 = (min_z - org_comp) * dir_comp;
             let t2 = (max_z - org_comp) * dir_comp;
 
-            let t_min = t_min.max(t1.min(t2));
-            let t_max = t_max.min(t1.max(t2));
+            let t_min: Vec4 = t_min.max(t1.min(t2));
+            let t_max: Vec4 = t_max.min(t1.max(t2));
 
             let greater_than_min = t_max.cmpgt(t_min);
-            let less_than_t = t_min.cmplt(Vec4::from([packet.t[i]; 4]));
+            let less_than_t = t_min.cmplt(Vec4::splat(packet.t[i]));
             result = result | (greater_than_min & less_than_t);
 
             final_t_min = final_t_min.min(t_min);
@@ -241,9 +309,9 @@ impl MBVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> Option<R>
-        where
-            I: FnMut(usize, f32, f32) -> Option<(f32, R)>,
-            R: Copy,
+    where
+        I: FnMut(usize, f32, f32) -> Option<(f32, R)>,
+        R: Copy,
     {
         let mut todo = [0; 32];
         let mut stack_ptr = 0;
@@ -253,6 +321,14 @@ impl MBVHNode {
 
         while stack_ptr >= 0 {
             let left_first = todo[stack_ptr as usize] as usize;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(left_first as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             stack_ptr = stack_ptr - 1;
 
             if let Some(hit) = tree[left_first].intersect(origin, dir_inverse, t) {
@@ -266,7 +342,7 @@ impl MBVHNode {
                             for i in 0..count {
                                 let prim_id = prim_indices[(left_first + i) as usize] as usize;
                                 if let Some((new_t, new_hit)) =
-                                intersection_test(prim_id as usize, t_min, t)
+                                    intersection_test(prim_id as usize, t_min, t)
                                 {
                                     t = new_t;
                                     hit_record = Some(new_hit);
@@ -276,6 +352,13 @@ impl MBVHNode {
                             stack_ptr += 1;
                             let stack_ptr = stack_ptr as usize;
                             todo[stack_ptr] = left_first as u32;
+
+                            unsafe {
+                                core::arch::x86_64::_mm_prefetch(
+                                    tree.as_ptr().add(left_first as usize) as *const i8,
+                                    core::arch::x86_64::_MM_HINT_T0,
+                                )
+                            };
                         }
                     }
                 }
@@ -295,8 +378,8 @@ impl MBVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> Option<f32>
-        where
-            I: FnMut(usize, f32, f32) -> Option<f32>,
+    where
+        I: FnMut(usize, f32, f32) -> Option<f32>,
     {
         let mut todo = [0; 32];
         let mut stack_ptr = -1;
@@ -305,6 +388,14 @@ impl MBVHNode {
 
         while stack_ptr >= 0 {
             let left_first = todo[stack_ptr as usize] as usize;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(left_first as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             stack_ptr -= 1;
 
             if let Some(hit) = tree[left_first].intersect(origin, dir_inverse, t) {
@@ -347,8 +438,8 @@ impl MBVHNode {
         t_max: f32,
         mut intersection_test: I,
     ) -> bool
-        where
-            I: FnMut(usize, f32, f32) -> bool,
+    where
+        I: FnMut(usize, f32, f32) -> bool,
     {
         let mut todo = [0; 32];
         let mut stack_ptr = -1;
@@ -357,6 +448,14 @@ impl MBVHNode {
 
         while stack_ptr >= 0 {
             let left_first = todo[stack_ptr as usize] as usize;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(left_first as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             stack_ptr -= 1;
 
             if let Some(hit) = tree[left_first].intersect(origin, dir_inverse, t) {
@@ -395,8 +494,8 @@ impl MBVHNode {
         t_max: f32,
         depth_test: I,
     ) -> (f32, u32)
-        where
-            I: Fn(usize, f32, f32) -> Option<(f32, u32)>,
+    where
+        I: Fn(usize, f32, f32) -> Option<(f32, u32)>,
     {
         let mut todo = [0; 32];
         let mut stack_ptr: i32 = 0;
@@ -406,6 +505,14 @@ impl MBVHNode {
 
         while stack_ptr >= 0 {
             let left_first = todo[stack_ptr as usize] as usize;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(left_first as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             stack_ptr = stack_ptr - 1;
 
             // if let Some(hit) = tree[left_first].intersect(origin, dir_inverse, t) {
@@ -456,6 +563,14 @@ impl MBVHNode {
 
         while stack_ptr >= 0 {
             let left_first = todo[stack_ptr as usize] as usize;
+
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    tree.as_ptr().add(left_first as usize) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                )
+            };
+
             stack_ptr -= 1;
 
             if let Some(hit) = tree[left_first].intersect4(packet, inv_dir_x, inv_dir_y, inv_dir_z)
@@ -474,6 +589,13 @@ impl MBVHNode {
                         } else if left_first >= 0 {
                             stack_ptr += 1;
                             todo[stack_ptr as usize] = left_first as u32;
+
+                            unsafe {
+                                core::arch::x86_64::_mm_prefetch(
+                                    tree.as_ptr().add(left_first as usize) as *const i8,
+                                    core::arch::x86_64::_MM_HINT_T0,
+                                )
+                            };
                         }
                     }
                 }
@@ -621,7 +743,13 @@ impl MBVHNode {
         }
 
         // In case this quad node isn't filled & not all nodes are leaf nodes, merge 1 more node
-        if num_children == 3 {
+        let mut merged = true;
+        while num_children < 4 {
+            if !merged {
+                break;
+            }
+            merged = false;
+
             for i in 0..3 {
                 if self.counts[i] >= 0 {
                     continue;
@@ -656,6 +784,9 @@ impl MBVHNode {
                         self.children[num_children] = right;
                         self.counts[num_children] = -1;
                     }
+
+                    num_children += 1;
+                    merged = true;
                 } else if let Some(left_first) = right_sub_node.get_left_first() {
                     if right_sub_node.is_leaf() {
                         self.children[i] = left_first as i32;
@@ -664,9 +795,9 @@ impl MBVHNode {
                         self.children[i] = right;
                         self.counts[i] = -1;
                     }
+                    merged = true;
                 }
 
-                num_children += 1;
                 break;
             }
         }

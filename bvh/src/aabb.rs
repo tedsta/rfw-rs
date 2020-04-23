@@ -13,20 +13,6 @@ pub struct AABB {
     pub count: i32,
 }
 
-// impl Serialize for AABB {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         let mut s = serializer.serialize_struct("AABB", 4)?;
-//         s.serialize_field("min", &self.min)?;
-//         s.serialize_field("left_first", &self.left_first)?;
-//         s.serialize_field("max", &self.max)?;
-//         s.serialize_field("count", &self.count)?;
-//         s.end()
-//     }
-// }
-
 pub trait Bounds {
     fn bounds(&self) -> AABB;
 }
@@ -53,11 +39,13 @@ impl Display for AABB {
 
 #[allow(dead_code)]
 impl AABB {
+    pub const DEFAULT_INF: f32 = 1e34;
+
     pub fn new() -> AABB {
         AABB {
-            min: [1e34; 3],
+            min: [Self::DEFAULT_INF; 3],
             left_first: -1,
-            max: [-1e34; 3],
+            max: [-Self::DEFAULT_INF; 3],
             count: -1,
         }
     }
@@ -274,5 +262,62 @@ impl AABB {
             max: transformed.max,
             ..(*self).clone()
         }
+    }
+
+    pub fn ensure_non_zero(&mut self) {
+        for i in 0..3 {
+            if self.max[i] - self.min[i] < 0.001 {
+                self.max[i] = self.min[i] + 0.005;
+            }
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let (min, max) = self.points();
+        max.cmpgt(min).all()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let (min, max) = self.points();
+
+        let mask1 = min.cmpeq(Vec3::splat(-Self::DEFAULT_INF));
+        let mask2 = max.cmpeq(Vec3::splat(Self::DEFAULT_INF));
+
+        (mask1 & mask2).all()
+    }
+
+    pub fn overlap(b1: &AABB, b2: &AABB) -> AABB {
+        assert!(b1.is_valid() || b1.is_empty());
+        assert!(b2.is_valid() || b2.is_empty());
+
+        let (min1, max1) = b1.points();
+        let (min2, max2) = b2.points();
+
+        let min = min1.max(min2);
+        let max = max1.min(max2);
+
+        let aabb: AABB = (min, max).into();
+
+        match aabb.is_valid() {
+            true => aabb,
+            _ => AABB::new()
+        }
+    }
+}
+
+impl From<(Vec3, Vec3)> for AABB {
+    fn from((min, max): (Vec3, Vec3)) -> Self {
+        AABB {
+            min: min.into(),
+            left_first: -1,
+            max: max.into(),
+            count: -1,
+        }
+    }
+}
+
+impl Into<(Vec3, Vec3)> for AABB {
+    fn into(self) -> (Vec3, Vec3) {
+        self.points()
     }
 }

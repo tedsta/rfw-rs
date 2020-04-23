@@ -5,7 +5,8 @@ pub mod bvh;
 pub mod bvh_node;
 pub mod mbvh_node;
 pub mod ray;
-pub mod partioning;
+pub mod partitioning;
+pub mod builders;
 
 pub use aabb::*;
 pub use bvh::*;

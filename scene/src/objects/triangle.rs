@@ -6,6 +6,8 @@ use serde::{Serialize, Deserialize};
 
 use bvh::{Bounds, Ray, RayPacket4, AABB};
 use std::ops::BitAnd;
+use bvh::partitioning::TriangleStorage;
+use glam::Vec3;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[repr(C)]
@@ -398,5 +400,31 @@ impl<'a> SerializableObject<'a, RTTriangle> for RTTriangle {
         let reader = std::io::BufReader::new(file);
         let object: Self = bincode::deserialize_from(reader)?;
         Ok(object)
+    }
+}
+
+impl TriangleStorage for RTTriangle {
+    fn vertex0(&self) -> Vec3 {
+        self.vertex0.into()
+    }
+
+    fn vertex1(&self) -> Vec3 {
+        self.vertex1.into()
+    }
+
+    fn vertex2(&self) -> Vec3 {
+        self.vertex0.into()
+    }
+
+    fn vertices(&self) -> (Vec3, Vec3, Vec3) {
+        (
+            self.vertex0.into(),
+            self.vertex1.into(),
+            self.vertex2.into(),
+        )
+    }
+
+    fn center(&self) -> Vec3 {
+        (self.vertex0() + self.vertex1() + self.vertex2()) * (1.0 / 3.0)
     }
 }

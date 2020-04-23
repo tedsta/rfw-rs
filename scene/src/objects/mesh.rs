@@ -150,7 +150,8 @@ impl Mesh {
         });
 
         let aabbs: Vec<AABB> = triangles.iter().map(|t| t.bounds()).collect();
-        let bvh = BVH::construct(aabbs.as_slice());
+        let bvh = BVH::construct_sbvh(aabbs.as_slice(), triangles.as_slice());
+        // let bvh = BVH::construct(aabbs.as_slice());
         let mbvh = MBVH::construct(&bvh);
 
         Mesh {

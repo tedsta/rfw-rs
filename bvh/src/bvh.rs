@@ -9,6 +9,7 @@ use crate::{RayPacket4, AABB};
 use rayon::prelude::*;
 
 use serde::{Serialize, Deserialize};
+use crate::partitioning::{IndicesRef, TriangleStorage};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BVH {
@@ -51,8 +52,8 @@ impl BVH {
                 center
             })
             .collect::<Vec<[f32; 3]>>();
-        let pool_ptr = Arc::new(AtomicUsize::new(2));
-        let depth = 1;
+        // let pool_ptr = Arc::new(AtomicUsize::new(2));
+        // let depth = 1;
 
         let mut root_bounds = AABB::new();
 
@@ -63,40 +64,171 @@ impl BVH {
         }
         nodes[0].bounds = root_bounds.clone();
 
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let thread_count = Arc::new(AtomicUsize::new(1));
-        let handle = crossbeam::scope(|s| {
-            BVHNode::subdivide_mt(
-                0,
-                root_bounds,
-                aabbs,
-                &centers,
-                sender,
-                prim_indices.as_mut_slice(),
-                depth,
-                pool_ptr.clone(),
-                thread_count,
-                num_cpus::get(),
-                s,
-            );
+        // let (sender, receiver) = std::sync::mpsc::channel();
+        // let thread_count = Arc::new(AtomicUsize::new(1));
+        // let handle = crossbeam::scope(|s| {
+        //     BVHNode::subdivide_mt(
+        //         0,
+        //         root_bounds,
+        //         aabbs,
+        //         &centers,
+        //         sender,
+        //         prim_indices.as_mut_slice(),
+        //         depth,
+        //         pool_ptr.clone(),
+        //         thread_count,
+        //         num_cpus::get(),
+        //         s,
+        //     );
+        // });
+        //
+        // for payload in receiver.iter() {
+        //     if payload.index >= nodes.len() {
+        //         panic!(
+        //             "Index was {} but only {} nodes available, bounds: {}",
+        //             payload.index,
+        //             nodes.len(),
+        //             payload.bounds
+        //         );
+        //     }
+        //     nodes[payload.index].bounds = payload.bounds;
+        // }
+        //
+        // handle.unwrap();
+        //
+        // let node_count = pool_ptr.load(Ordering::SeqCst);
+        // nodes.resize(node_count, BVHNode::new());
+
+        let mut indices_x: Vec<u32> = (0..aabbs.len()).map(|i| i as u32).collect();
+        let mut indices_y = indices_x.clone();
+        let mut indices_z = indices_x.clone();
+
+        indices_x.sort_by(|a, b| -> std::cmp::Ordering {
+            let c_a = centers[*a as usize];
+            let c_b = centers[*b as usize];
+
+            if c_a[0] < c_b[0] {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
+        });
+        indices_y.sort_by(|a, b| -> std::cmp::Ordering {
+            let c_a = centers[*a as usize];
+            let c_b = centers[*b as usize];
+
+            if c_a[1] < c_b[1] {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
         });
 
-        for payload in receiver.iter() {
-            if payload.index >= nodes.len() {
-                panic!(
-                    "Index was {} but only {} nodes available, bounds: {}",
-                    payload.index,
-                    nodes.len(),
-                    payload.bounds
-                );
+        indices_z.sort_by(|a, b| -> std::cmp::Ordering {
+            let c_a = centers[*a as usize];
+            let c_b = centers[*b as usize];
+
+            if c_a[2] < c_b[2] {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
             }
-            nodes[payload.index].bounds = payload.bounds;
+        });
+
+        let mut pool_ptr = 2;
+        let indices = IndicesRef::new(indices_x.as_mut_slice(), indices_y.as_mut_slice(), indices_z.as_mut_slice());
+
+        crate::builders::build_bvh(0, aabbs, centers.as_slice(), &indices, nodes.as_mut_slice(), &mut pool_ptr, 0, aabbs.len());
+        prim_indices.copy_from_slice(indices.as_slice(0));
+
+        println!("Node count: {}, max: {}", pool_ptr, aabbs.len() * 2);
+
+        BVH {
+            nodes,
+            prim_indices,
+        }
+    }
+
+    pub fn construct_sbvh(aabbs: &[AABB], triangles: &[impl TriangleStorage]) -> Self {
+        let mut nodes = vec![
+            BVHNode {
+                bounds: AABB::new()
+            };
+            aabbs.len() * 2
+        ];
+        let mut prim_indices = vec![0; aabbs.len()];
+        for i in 0..aabbs.len() {
+            prim_indices[i] = i as u32;
         }
 
-        handle.unwrap();
+        let centers = aabbs
+            .into_par_iter()
+            .map(|bb| {
+                let center = [
+                    (bb.min[0] + bb.max[0]) * 0.5,
+                    (bb.min[1] + bb.max[1]) * 0.5,
+                    (bb.min[2] + bb.max[2]) * 0.5,
+                ];
+                center
+            })
+            .collect::<Vec<[f32; 3]>>();
 
-        let node_count = pool_ptr.load(Ordering::SeqCst);
-        nodes.resize(node_count, BVHNode::new());
+        let mut root_bounds = AABB::new();
+
+        root_bounds.left_first = 0;
+        root_bounds.count = aabbs.len() as i32;
+        for aabb in aabbs {
+            root_bounds.grow_bb(aabb);
+        }
+        nodes[0].bounds = root_bounds.clone();
+
+        let mut indices_x: Vec<u32> = (0..aabbs.len()).map(|i| i as u32).collect();
+        let mut indices_y = indices_x.clone();
+        let mut indices_z = indices_x.clone();
+
+        indices_x.sort_by(|a, b| -> std::cmp::Ordering {
+            let c_a = centers[*a as usize];
+            let c_b = centers[*b as usize];
+
+            if c_a[0] < c_b[0] {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
+        });
+        indices_y.sort_by(|a, b| -> std::cmp::Ordering {
+            let c_a = centers[*a as usize];
+            let c_b = centers[*b as usize];
+
+            if c_a[1] < c_b[1] {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
+        });
+
+        indices_z.sort_by(|a, b| -> std::cmp::Ordering {
+            let c_a = centers[*a as usize];
+            let c_b = centers[*b as usize];
+
+            if c_a[2] < c_b[2] {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            }
+        });
+
+        indices_x.resize(aabbs.len() * 2, 0);
+        indices_y.resize(aabbs.len() * 2, 0);
+        indices_z.resize(aabbs.len() * 2, 0);
+
+        let mut pool_ptr = 2;
+        let indices = IndicesRef::new(indices_x.as_mut_slice(), indices_y.as_mut_slice(), indices_z.as_mut_slice());
+
+        crate::builders::build_sbvh(0, aabbs, triangles, centers.as_slice(), &indices, nodes.as_mut_slice(), &mut pool_ptr, 0, aabbs.len(), &root_bounds, 1.0 / root_bounds.area());
+        prim_indices.copy_from_slice(indices.as_slice(0));
+
+        println!("Node count: {}, max: {}", pool_ptr, aabbs.len() * 2);
 
         BVH {
             nodes,

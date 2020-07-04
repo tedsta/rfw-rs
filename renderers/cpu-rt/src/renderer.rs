@@ -84,7 +84,11 @@ impl Renderer for RayTracer<'_> {
                 power_preference: wgpu::PowerPreference::Default,
                 compatible_surface: Some(&surface),
             },
-            wgpu::BackendBit::PRIMARY,
+            if cfg!(target_os = "windows") {
+                wgpu::BackendBit::DX12
+            } else {
+                wgpu::BackendBit::PRIMARY
+            },
         ))
         .unwrap();
 

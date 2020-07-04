@@ -10,7 +10,7 @@ enum AppType {
     GPU,
 }
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::MutexGuard};
 pub use winit::event::MouseButton as MouseButtonCode;
 pub use winit::event::VirtualKeyCode as KeyCode;
 use winit::{
@@ -20,71 +20,13 @@ use winit::{
     window::WindowBuilder,
 };
 
-pub struct KeyHandler {
-    states: HashMap<VirtualKeyCode, bool>,
-}
-
-impl KeyHandler {
-    pub fn new() -> KeyHandler {
-        Self {
-            states: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, key: KeyCode, state: ElementState) {
-        self.states.insert(
-            key,
-            match state {
-                ElementState::Pressed => true,
-                _ => false,
-            },
-        );
-    }
-
-    pub fn pressed(&self, key: KeyCode) -> bool {
-        if let Some(state) = self.states.get(&key) {
-            return *state;
-        }
-        false
-    }
-}
-
-pub struct MouseButtonHandler {
-    states: HashMap<MouseButtonCode, bool>,
-}
-
-impl MouseButtonHandler {
-    pub fn new() -> MouseButtonHandler {
-        Self {
-            states: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, key: MouseButtonCode, state: ElementState) {
-        self.states.insert(
-            key,
-            match state {
-                ElementState::Pressed => true,
-                _ => false,
-            },
-        );
-    }
-
-    pub fn pressed(&self, key: MouseButtonCode) -> bool {
-        if let Some(state) = self.states.get(&key) {
-            return *state;
-        }
-        false
-    }
-}
-
 use crate::utils::Timer;
 use glam::*;
 use scene::{
     renderers::{RenderMode, Setting, SettingValue},
-    InstanceRef,
+    Entity, InstanceECS, InstanceRef, WriteStorage,
 };
-use shared::utils;
+use shared::*;
 
 fn main() {
     let mut width = 1280;
@@ -117,7 +59,7 @@ fn main() {
     use scene::RenderSystem;
     use wgpu_renderer::Deferred;
 
-    let renderer: RenderSystem<Deferred> =
+    let mut renderer: RenderSystem<Deferred> =
         RenderSystem::new(&window, render_width, render_height).unwrap();
     let mut camera = scene::Camera::new(render_width as u32, render_height as u32);
     camera.change_fov(90.0);
@@ -136,16 +78,16 @@ fn main() {
         .unwrap();
     renderer.add_directional_light([0.0, -1.0, -0.1], [1.0; 3]);
     let sponza = renderer.load_mesh("models/sponza/sponza.obj").unwrap();
-    let mut instance: InstanceRef = renderer.add_instance(sponza).unwrap();
-    instance.scale(Vec3::splat(0.1));
-    instance.synchronize().unwrap();
 
-    // let cbox = renderer.load_mesh("models/cbox.obj").unwrap();
-    // let mut instance: InstanceRef = renderer.add_instance(cbox).unwrap();
-    // instance.rotate_y(180.0);
-    // instance.translate_y(-2.5);
-    // instance.translate_z(6.5);
-    // instance.synchronize().unwrap();
+    let entity: Entity = renderer.add_instance(sponza).unwrap();
+    renderer.get_component_mut::<InstanceRef, _>(entity, |instance| {
+        if let Some(instance) = instance {
+            instance.rotate_y(180.0);
+            instance.translate_y(-2.5);
+            instance.translate_z(6.5);
+            instance.scale(Vec3::splat(0.1));
+        }
+    });
 
     let settings: Vec<scene::renderers::Setting> = renderer.get_settings().unwrap();
 
@@ -256,8 +198,11 @@ fn main() {
                 };
 
                 if key_handler.pressed(KeyCode::Space) {
-                    instance.rotate_y(elapsed / 10.0);
-                    instance.synchronize().unwrap();
+                    renderer.get_component_mut::<InstanceRef, _>(entity, |instance| {
+                        if let Some(instance) = instance {
+                            instance.rotate_y(elapsed / 10.0);
+                        }
+                    });
                 }
 
                 timer.reset();

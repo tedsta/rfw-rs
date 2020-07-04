@@ -18,6 +18,7 @@ pub enum SceneFlags {
 #[derive(Debug)]
 pub enum SceneError {
     IndexOutOfBounds(usize, usize),
+    UnknownError,
 }
 
 impl SceneError {
@@ -27,6 +28,7 @@ impl SceneError {
                 "Index {} was out of bounds, length: {}",
                 index, len
             )),
+            _ => String::from("Unknown error"),
         }
     }
 }

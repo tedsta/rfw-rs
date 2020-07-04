@@ -18,6 +18,7 @@ bitvec = { version = "0.17", features = ["serde"] }
 rand = { version = "0.7", features = ["small_rng"] }
 raw-window-handle = "0.3"
 gltf = "0.15"
+specs = "0.16.1"
 
 [features]
 default = []

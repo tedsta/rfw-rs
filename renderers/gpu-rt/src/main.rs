@@ -20,71 +20,13 @@ use winit::{
     window::WindowBuilder,
 };
 
-pub struct KeyHandler {
-    states: HashMap<VirtualKeyCode, bool>,
-}
-
-impl KeyHandler {
-    pub fn new() -> KeyHandler {
-        Self {
-            states: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, key: KeyCode, state: ElementState) {
-        self.states.insert(
-            key,
-            match state {
-                ElementState::Pressed => true,
-                _ => false,
-            },
-        );
-    }
-
-    pub fn pressed(&self, key: KeyCode) -> bool {
-        if let Some(state) = self.states.get(&key) {
-            return *state;
-        }
-        false
-    }
-}
-
-pub struct MouseButtonHandler {
-    states: HashMap<MouseButtonCode, bool>,
-}
-
-impl MouseButtonHandler {
-    pub fn new() -> MouseButtonHandler {
-        Self {
-            states: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, key: MouseButtonCode, state: ElementState) {
-        self.states.insert(
-            key,
-            match state {
-                ElementState::Pressed => true,
-                _ => false,
-            },
-        );
-    }
-
-    pub fn pressed(&self, key: MouseButtonCode) -> bool {
-        if let Some(state) = self.states.get(&key) {
-            return *state;
-        }
-        false
-    }
-}
-
 use crate::utils::Timer;
 use glam::*;
 use scene::{
     renderers::{RenderMode, Setting, SettingValue},
     InstanceRef,
 };
-use shared::utils;
+use shared::*;
 
 fn main() {
     let mut width = 1024;
@@ -117,7 +59,7 @@ fn main() {
     let render_width = (width as f64 / dpi_factor) as usize;
     let render_height = (height as f64 / dpi_factor) as usize;
 
-    let renderer: RenderSystem<RayTracer> =
+    let mut renderer: RenderSystem<RayTracer> =
         RenderSystem::new(&window, render_width, render_height).unwrap();
     let mut camera = scene::Camera::new(render_width as u32, render_height as u32);
 
@@ -125,24 +67,13 @@ fn main() {
     let mut fps = utils::Averager::new();
     let mut resized = false;
 
-    let mut instances = Vec::new();
-
-    // let cbox = renderer.load_mesh("models/cbox.obj").unwrap();
-    // for i in 0..=10 {
-    //     let mut instance: InstanceRef = renderer.add_instance(cbox).unwrap();
-    //     instance.rotate_y(180.0);
-    //     instance.translate_y(-2.5);
-    //     instance.translate_x(((i - 5) * 8) as f32);
-    //     instance.translate_z(10.0);
-    //     instance.synchronize().unwrap();
-    //     instances.push(instance);
-    // }
-
     let sponza = renderer.load_mesh("models/sponza/sponza.obj").unwrap();
-    let mut instance: InstanceRef = renderer.add_instance(sponza).unwrap();
-    instance.scale(Vec3::splat(0.1));
-    instance.synchronize().unwrap();
-    instances.push(instance);
+    let mut entity = renderer.add_instance(sponza).unwrap();
+    renderer.get_component_mut::<InstanceRef, _>(entity, |instance| {
+        if let Some(instance) = instance {
+            instance.scale(Vec3::splat(0.1));
+        }
+    });
 
     let settings: Vec<scene::renderers::Setting> = renderer.get_settings().unwrap();
     let mut mode = RenderMode::Reset;
@@ -252,14 +183,6 @@ fn main() {
                 } else {
                     elapsed
                 };
-
-                if key_handler.pressed(KeyCode::Space) {
-                    instances.iter_mut().for_each(|instance| {
-                        instance.rotate_y(elapsed / 10.0);
-                        instance.synchronize().unwrap();
-                    });
-                    mode = RenderMode::Reset;
-                }
 
                 timer.reset();
 

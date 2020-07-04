@@ -7,7 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-winit = "0.22"
 rpmalloc = "0.2"
 rtbvh = { git = "https://github.com/MeirBon/rtbvh.git" }
 scene = { path = "../../scene" }

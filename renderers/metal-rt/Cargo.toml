@@ -12,6 +12,5 @@ cocoa = "0.20"
 core-graphics = "0.19"
 objc = "0.2"
 glam = "0.8"
-winit = "0.22"
 scene = { path = "../../scene" }
 shared = { path = "../shared" }

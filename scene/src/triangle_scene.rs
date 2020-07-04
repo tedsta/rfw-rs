@@ -10,25 +10,18 @@ use rtbvh::{Bounds, AABB};
 use bitvec::prelude::*;
 use loaders::obj;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, TryLockResult};
-use std::{
-    cmp::Ordering,
-    collections::HashSet,
-    error,
-    error::Error,
-    ffi::OsString,
-    fmt,
-    fs::File,
-    io::prelude::*,
-    io::BufReader,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashSet, error, fmt, path::Path};
 use utils::Flags;
+
+#[cfg(feature = "object_caching")]
+use std::{cmp::Ordering, error::Error, ffi::OsString, fs::File, io::BufReader, path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub enum SceneError {
     InvalidObjectIndex(usize),
     InvalidInstanceIndex(usize),
-    LoadError(PathBuf),
+    LoadError(std::path::PathBuf),
+    UnknownError
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -49,6 +42,7 @@ impl fmt::Display for SceneError {
             Self::InvalidObjectIndex(idx) => format!("invalid object index {}", idx),
             Self::InvalidInstanceIndex(idx) => format!("invalid instances index {}", idx),
             SceneError::LoadError(path) => format!("could not load file: {}", path.display()),
+            _ => String::from("unknown error")
         };
 
         write!(f, "{}", string)
@@ -188,6 +182,10 @@ impl TriangleScene {
         self.scene.try_lock()
     }
 
+    pub fn objects(&self) -> Arc<Mutex<InstancedObjects>> {
+        self.scene.clone()
+    }
+
     pub fn lights_lock(&self) -> TryLockResult<MutexGuard<'_, SceneLights>> {
         self.lights.try_lock()
     }
@@ -266,12 +264,17 @@ impl TriangleScene {
                 }
 
                 let obj = obj.unwrap();
-                let mut mesh = obj.into_mesh();
+                let mesh = obj.into_mesh();
 
                 // Serialize object for future use
                 #[cfg(feature = "object_caching")]
-                cache_mesh(&mut mesh, &cached_object);
+                {
+                    let mut mesh = mesh;
+                    cache_mesh(&mut mesh, &cached_object);
+                    mesh
+                }
 
+                #[cfg(not(feature = "object_caching"))]
                 mesh
             };
 

@@ -10,6 +10,8 @@ pub mod renderers;
 pub mod scene;
 pub mod triangle_scene;
 
+pub use specs::prelude::*;
+
 mod utils;
 
 pub use camera::*;
@@ -33,71 +35,85 @@ use std::path::Path;
 
 pub struct InstanceRef {
     id: usize,
-    objects: Arc<Mutex<InstancedObjects>>,
     translation: Vec3,
     scaling: Vec3,
     rotation_x: f32,
     rotation_y: f32,
     rotation_z: f32,
+    changed: bool,
+}
+
+impl Component for InstanceRef {
+    type Storage = FlaggedStorage<Self>;
 }
 
 #[allow(dead_code)]
 impl InstanceRef {
-    fn new(id: usize, objects: Arc<Mutex<InstancedObjects>>) -> InstanceRef {
+    fn new(id: usize) -> InstanceRef {
         Self {
             id,
-            objects,
             translation: Vec3::zero(),
             scaling: Vec3::one(),
             rotation_x: 0.0,
             rotation_y: 0.0,
             rotation_z: 0.0,
+            changed: true,
         }
     }
 
     pub fn translate_x(&mut self, offset: f32) {
         self.translation += Vec3::new(offset, 0.0, 0.0);
+        self.changed = true;
     }
 
     pub fn translate_y(&mut self, offset: f32) {
         self.translation += Vec3::new(0.0, offset, 0.0);
+        self.changed = true;
     }
 
     pub fn translate_z(&mut self, offset: f32) {
         self.translation += Vec3::new(0.0, 0.0, offset);
+        self.changed = true;
     }
 
     pub fn rotate_x(&mut self, degrees: f32) {
         self.rotation_x = (self.rotation_x + degrees.to_radians()) % (std::f32::consts::PI * 2.0);
+        self.changed = true;
     }
 
     pub fn rotate_y(&mut self, degrees: f32) {
         self.rotation_y = (self.rotation_y + degrees.to_radians()) % (std::f32::consts::PI * 2.0);
+        self.changed = true;
     }
 
     pub fn rotate_z(&mut self, degrees: f32) {
         self.rotation_z = (self.rotation_z + degrees.to_radians()) % (std::f32::consts::PI * 2.0);
+        self.changed = true;
     }
 
     pub fn scale<T: Into<[f32; 3]>>(&mut self, scale: T) {
         let scale: [f32; 3] = scale.into();
         let scale: Vec3 = Vec3::from(scale).max(Vec3::splat(0.001));
         self.scaling *= scale;
+        self.changed = true;
     }
 
     pub fn scale_x(&mut self, scale: f32) {
         let scale = scale.max(0.001);
         self.scaling[0] *= scale;
+        self.changed = true;
     }
 
     pub fn scale_y(&mut self, scale: f32) {
         let scale = scale.max(0.001);
         self.scaling[1] *= scale;
+        self.changed = true;
     }
 
     pub fn scale_z(&mut self, scale: f32) {
         let scale = scale.max(0.001);
         self.scaling[2] *= scale;
+        self.changed = true;
     }
 
     /// Returns translation in [x, y, z]
@@ -131,26 +147,15 @@ impl InstanceRef {
         [self.rotation_x, self.rotation_y, self.rotation_z]
     }
 
-    /// Updates instance in scene
-    pub fn synchronize(&self) -> Result<(), TryLockError<MutexGuard<InstancedObjects>>> {
-        match self.objects.try_lock() {
-            Ok(mut o) => {
-                if let Some(instance) = o.instances.get_mut(self.id) {
-                    let rotation_x = Quat::from_axis_angle(Vec3::unit_x(), self.rotation_x);
-                    let rotation_y = Quat::from_axis_angle(Vec3::unit_y(), self.rotation_y);
-                    let rotation_z = Quat::from_axis_angle(Vec3::unit_z(), self.rotation_z);
-                    instance.set_transform(Mat4::from_scale_rotation_translation(
-                        self.scaling.into(),
-                        rotation_x * rotation_y * rotation_z,
-                        self.translation.into(),
-                    ));
-                }
-
-                o.instances_changed.set(self.id, true);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
+    pub fn trs_matrix(&self) -> Mat4 {
+        let rotation_x = Quat::from_axis_angle(Vec3::unit_x(), self.rotation_x);
+        let rotation_y = Quat::from_axis_angle(Vec3::unit_y(), self.rotation_y);
+        let rotation_z = Quat::from_axis_angle(Vec3::unit_z(), self.rotation_z);
+        Mat4::from_scale_rotation_translation(
+            self.scaling.into(),
+            rotation_x * rotation_y * rotation_z,
+            self.translation.into(),
+        )
     }
 }
 
@@ -182,28 +187,20 @@ impl LightRef {
 
     pub fn translate_x(&mut self, offset: f32) {
         let translation = Vec3::new(offset, 0.0, 0.0);
-        match &mut self.light {
-            SceneLight::Spot(l) => {
-                let position: Vec3 = Vec3::from(l.position) + translation;
-                l.position = position.into();
-            }
-            _ => {}
-        }
+        self.translate(translation);
     }
 
     pub fn translate_y(&mut self, offset: f32) {
         let translation = Vec3::new(0.0, offset, 0.0);
-        match &mut self.light {
-            SceneLight::Spot(l) => {
-                let position: Vec3 = Vec3::from(l.position) + translation;
-                l.position = position.into();
-            }
-            _ => {}
-        }
+        self.translate(translation);
     }
 
     pub fn translate_z(&mut self, offset: f32) {
         let translation = Vec3::new(0.0, 0.0, offset);
+        self.translate(translation);
+    }
+
+    fn translate(&mut self, translation: Vec3) {
         match &mut self.light {
             SceneLight::Spot(l) => {
                 let position: Vec3 = Vec3::from(l.position) + translation;
@@ -215,40 +212,20 @@ impl LightRef {
 
     pub fn rotate_x(&mut self, degrees: f32) {
         let rotation = Mat4::from_rotation_x(degrees.to_radians());
-        match &mut self.light {
-            SceneLight::Spot(l) => {
-                let direction: Vec3 = l.direction.into();
-                let direction = rotation * direction.extend(0.0);
-                l.direction = direction.truncate().into();
-            }
-            SceneLight::Directional(l) => {
-                let direction: Vec3 = l.direction.into();
-                let direction = rotation * direction.extend(0.0);
-                l.direction = direction.truncate().into();
-            }
-            _ => {}
-        }
+        self.rotate(rotation);
     }
 
     pub fn rotate_y(&mut self, degrees: f32) {
         let rotation = Mat4::from_rotation_y(degrees.to_radians());
-        match &mut self.light {
-            SceneLight::Spot(l) => {
-                let direction: Vec3 = l.direction.into();
-                let direction = rotation * direction.extend(0.0);
-                l.direction = direction.truncate().into();
-            }
-            SceneLight::Directional(l) => {
-                let direction: Vec3 = l.direction.into();
-                let direction = rotation * direction.extend(0.0);
-                l.direction = direction.truncate().into();
-            }
-            _ => {}
-        }
+        self.rotate(rotation);
     }
 
     pub fn rotate_z(&mut self, degrees: f32) {
         let rotation = Mat4::from_rotation_z(degrees.to_radians());
+        self.rotate(rotation);
+    }
+
+    fn rotate(&mut self, rotation: Mat4) {
         match &mut self.light {
             SceneLight::Spot(l) => {
                 let direction: Vec3 = l.direction.into();
@@ -291,6 +268,60 @@ impl LightRef {
 pub struct RenderSystem<T: Sized + Renderer> {
     scene: TriangleScene,
     renderer: Arc<Mutex<Box<T>>>,
+    pub world: World,
+}
+
+pub struct SynchronizeJob<T: Sized + Renderer> {
+    renderer: Arc<Mutex<Box<T>>>,
+}
+
+unsafe impl<T: Sized + Renderer> Send for SynchronizeJob<T> {}
+
+unsafe impl<T: Sized + Renderer> Sync for SynchronizeJob<T> {}
+
+impl<'a, T: Sized + Renderer> System<'a> for SynchronizeJob<T> {
+    type SystemData = ();
+
+    fn run(&mut self, data: Self::SystemData) {
+        if let Ok(mut renderer) = self.renderer.lock() {
+            renderer.synchronize();
+        }
+    }
+}
+
+pub struct InstanceECS<T: Sized + Renderer> {
+    scene: Arc<Mutex<InstancedObjects>>,
+    renderer: Arc<Mutex<Box<T>>>,
+}
+
+unsafe impl<T: Sized + Renderer> Send for InstanceECS<T> {}
+
+unsafe impl<T: Sized + Renderer> Sync for InstanceECS<T> {}
+
+impl<'a, T: Sized + Renderer> System<'a> for InstanceECS<T> {
+    type SystemData = WriteStorage<'a, InstanceRef>;
+
+    fn run(&mut self, mut data: Self::SystemData) {
+        let scene = self.scene.lock();
+        let renderer = self.renderer.lock();
+
+        if scene.is_err() || renderer.is_err() {
+            return;
+        }
+
+        let mut scene = scene.unwrap();
+        let mut renderer = renderer.unwrap();
+
+        for instance in (&mut data).join() {
+            if !instance.changed {
+                continue;
+            }
+
+            scene.instances[instance.id].set_transform(instance.trs_matrix());
+            renderer.set_instance(instance.id, &scene.instances[instance.id]);
+            instance.changed = false;
+        }
+    }
 }
 
 impl<T: Sized + Renderer> RenderSystem<T> {
@@ -300,10 +331,13 @@ impl<T: Sized + Renderer> RenderSystem<T> {
         height: usize,
     ) -> Result<Self, Box<dyn Error>> {
         let renderer = T::init(window, width, height)?;
+        let mut world = World::new();
+        world.register::<InstanceRef>();
 
         Ok(Self {
             scene: TriangleScene::new(),
             renderer: Arc::new(Mutex::new(renderer)),
+            world,
         })
     }
 
@@ -344,11 +378,13 @@ impl<T: Sized + Renderer> RenderSystem<T> {
         self.scene.add_object(object.into())
     }
 
-    pub fn add_instance(&self, object: usize) -> Result<InstanceRef, triangle_scene::SceneError> {
+    pub fn add_instance(&mut self, object: usize) -> Result<Entity, triangle_scene::SceneError> {
         let id = self.scene.add_instance(object, Mat4::identity())?;
-
-        let reference = InstanceRef::new(id, self.scene.get_scene());
-        Ok(reference)
+        Ok(self
+            .world
+            .create_entity()
+            .with(InstanceRef::new(id))
+            .build())
     }
 
     /// Will return a reference to the point light if the scene is not locked
@@ -543,11 +579,27 @@ impl<T: Sized + Renderer> RenderSystem<T> {
                     changed = true;
                 }
             }
-
-            if changed {
-                renderer.synchronize();
-            }
         }
+
+        let mut dispatcher = DispatcherBuilder::new()
+            .with(
+                InstanceECS {
+                    renderer: self.renderer.clone(),
+                    scene: self.scene.objects(),
+                },
+                "update-instances",
+                &[],
+            )
+            .with(
+                SynchronizeJob {
+                    renderer: self.renderer.clone(),
+                },
+                "synchronize",
+                &["update-instances"],
+            )
+            .build();
+
+        dispatcher.dispatch(&self.world);
     }
 
     pub fn get_settings(&self) -> Result<Vec<Setting>, ()> {
@@ -565,5 +617,19 @@ impl<T: Sized + Renderer> RenderSystem<T> {
         } else {
             Err(())
         }
+    }
+
+    pub fn get_component<C: Component, F: FnMut(Option<&C>)>(&self, entity: Entity, mut cb: F) {
+        let data = self.world.system_data::<ReadStorage<C>>();
+        cb(data.get(entity));
+    }
+
+    pub fn get_component_mut<C: Component, F: FnMut(Option<&mut C>)>(
+        &self,
+        entity: Entity,
+        mut cb: F,
+    ) {
+        let mut data = self.world.system_data::<WriteStorage<C>>();
+        cb(data.get_mut(entity))
     }
 }
